@@ -7,10 +7,14 @@ pandas DataFrames) rather than leaking sqlite-specific objects, so swapping
 the backend (e.g. to Postgres via SQLAlchemy) later only means rewriting
 this file.
 
-Three tables: an account can have many daily_entries (one per calendar
-date, enforced by a UNIQUE constraint so re-logging a date edits in place),
-and a daily_entry can have many screenshots. This module is pure SQL —
-screenshot file I/O lives in data/storage.py, orchestrated by the views.
+An account has many daily_entries (one per calendar date, enforced by a
+UNIQUE constraint so re-logging a date edits in place). A daily_entry has
+many trade_entries (individual trades logged that day — daily_entries.pnl
+is a maintained sum of these, kept in sync by recompute_daily_pnl()
+whenever a trade is added/removed, so every other reader of .pnl —
+analytics, charts, calendar coloring — never has to know trades exist) and
+many screenshots. This module is pure SQL — screenshot file I/O lives in
+data/storage.py, orchestrated by the views.
 """
 
 import os
@@ -58,6 +62,13 @@ CREATE TABLE IF NOT EXISTS daily_entries (
     notes TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(account_id, entry_date)
+);
+
+CREATE TABLE IF NOT EXISTS trade_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    daily_entry_id INTEGER NOT NULL REFERENCES daily_entries(id) ON DELETE CASCADE,
+    pnl REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS screenshots (
@@ -187,17 +198,23 @@ def upsert_daily_entry(account_id: int, entry_date: str, pnl: float, notes: str 
 
 def get_daily_entries(account_id: int | None = None) -> pd.DataFrame:
     """All daily entries, optionally scoped to one account. account_id=None
-    returns every account's entries (used for the "All Accounts" view)."""
+    returns every account's entries (used for the "All Accounts" view).
+    Includes a trade_count column (via LEFT JOIN trade_entries) so every
+    page that already consumes this DataFrame gets trade counts for free,
+    the same way it already gets pnl/notes."""
+    query = """
+        SELECT e.*, COUNT(t.id) AS trade_count
+        FROM daily_entries e
+        LEFT JOIN trade_entries t ON t.daily_entry_id = e.id
+    """
+    params = ()
+    if account_id is not None:
+        query += " WHERE e.account_id = ?"
+        params = (account_id,)
+    query += " GROUP BY e.id ORDER BY e.entry_date ASC, e.id ASC"
+
     with get_connection() as conn:
-        if account_id is None:
-            df = pd.read_sql_query(
-                "SELECT * FROM daily_entries ORDER BY entry_date ASC, id ASC", conn
-            )
-        else:
-            df = pd.read_sql_query(
-                "SELECT * FROM daily_entries WHERE account_id = ? ORDER BY entry_date ASC, id ASC",
-                conn, params=(account_id,),
-            )
+        df = pd.read_sql_query(query, conn, params=params)
     if not df.empty:
         df["entry_date"] = pd.to_datetime(df["entry_date"], errors="coerce")
         df["notes"] = df["notes"].where(df["notes"].notna(), None)
@@ -214,9 +231,67 @@ def get_daily_entry(account_id: int, entry_date: str) -> dict | None:
         return dict(row) if row else None
 
 
+def ensure_daily_entry(account_id: int, entry_date: str) -> int:
+    """Returns the id of the daily_entries row for this account+date,
+    creating an empty one (pnl=0, no notes) if it doesn't exist yet. Safe
+    to call repeatedly — never touches pnl/notes on an existing row (unlike
+    upsert_daily_entry, which overwrites both), so it can't clobber trades
+    already recorded for the day."""
+    existing = get_daily_entry(account_id, entry_date)
+    if existing:
+        return existing["id"]
+    return upsert_daily_entry(account_id, entry_date, 0.0, None)
+
+
+def set_daily_notes(daily_entry_id: int, notes: str | None) -> None:
+    with get_connection() as conn:
+        conn.execute("UPDATE daily_entries SET notes = ? WHERE id = ?", (notes, daily_entry_id))
+
+
 def delete_daily_entry(entry_id: int) -> None:
     with get_connection() as conn:
         conn.execute("DELETE FROM daily_entries WHERE id = ?", (entry_id,))
+
+
+# -------------------------------------------------------------- trade entries
+
+def add_trade_entry(daily_entry_id: int, pnl: float) -> int:
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO trade_entries (daily_entry_id, pnl) VALUES (?, ?)",
+            (daily_entry_id, pnl),
+        )
+        return cur.lastrowid
+
+
+def get_trade_entries(daily_entry_id: int) -> list[dict]:
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM trade_entries WHERE daily_entry_id = ? ORDER BY created_at ASC, id ASC",
+            (daily_entry_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_trade_entry(trade_entry_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM trade_entries WHERE id = ?", (trade_entry_id,))
+
+
+def recompute_daily_pnl(daily_entry_id: int) -> float:
+    """Re-sums this day's trade_entries and writes the total back onto
+    daily_entries.pnl. Call after any add/delete of a trade entry — every
+    other reader of daily_entries.pnl (analytics, charts, calendar cell
+    coloring) stays correct without knowing trade_entries exists."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(pnl), 0) FROM trade_entries WHERE daily_entry_id = ?",
+            (daily_entry_id,),
+        ).fetchone()
+        total = row[0] or 0.0
+        conn.execute("UPDATE daily_entries SET pnl = ? WHERE id = ?", (total, daily_entry_id))
+    return total
 
 
 # ------------------------------------------------------------- screenshots

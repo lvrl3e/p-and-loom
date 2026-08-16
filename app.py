@@ -4,17 +4,18 @@ from data.db import init_db, get_all_accounts
 from ui import theme
 from ui.account_selector import ensure_selection, get_selected_id, ALL_ACCOUNTS
 
-st.set_page_config(page_title="Trading Journal", page_icon="📈", layout="wide")
+st.set_page_config(page_title="P&Loom", page_icon="docs/logo-icon.png", layout="wide")
+theme.apply_theme()
 theme.inject_css()
 init_db()
 
 with st.sidebar:
     st.markdown(
-        """
+        f"""
         <div class="tj-brand">
-            <div class="tj-brand-mark">TJ</div>
+            <img src="{theme.logo_icon_data_uri()}" class="tj-brand-mark-img" alt="P&Loom" />
             <div>
-                <div class="tj-brand-name">Trading Journal</div>
+                <div class="tj-brand-name">P&amp;Loom</div>
                 <div class="tj-brand-sub"><span class="tj-pulse-dot"></span>Live · local session</div>
             </div>
         </div>

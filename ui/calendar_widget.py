@@ -29,24 +29,28 @@ def render_month(weeks: list, account: dict | None, clickable: bool = True) -> N
             date_key = cell["date"].isoformat()
             with col:
                 with st.container(key=f"calday-{date_key}"):
+                    # The day number and P&L amount are baked into ONE button
+                    # label (markdown hard-break) rather than a button plus a
+                    # separate markdown element below it — Streamlit sizes its
+                    # own container to fit exactly what the button reports, so
+                    # a second sibling element it doesn't measure ends up
+                    # rendered outside/below the colored box no matter what
+                    # CSS height is set on the container (confirmed empirically:
+                    # the gap persists unchanged across every height override).
+                    label = str(cell["date"].day)
                     help_text = None
                     if cell["pnl"] is not None:
                         sign = "+" if cell["pnl"] >= 0 else "-"
+                        amount = f"{sign}${abs(cell['pnl']):,.0f}"
                         help_text = f"{sign}${abs(cell['pnl']):,.2f}"
+                        label = f"{label}  \n{amount}"
                     clicked = st.button(
-                        str(cell["date"].day),
+                        label,
                         key=f"calday-btn-{date_key}",
                         help=help_text,
                         disabled=not interactive,
                         width="stretch",
                     )
-                    if cell["pnl"] is not None:
-                        color = theme.pnl_color(cell["pnl"]) if cell["outcome"] != "Breakeven" else theme.TEXT_SECONDARY
-                        sign = "+" if cell["pnl"] >= 0 else "-"
-                        st.markdown(
-                            f'<div class="tj-cal-pnl" style="color:{color};">{sign}${abs(cell["pnl"]):,.0f}</div>',
-                            unsafe_allow_html=True,
-                        )
                     if clicked and interactive:
                         daily_entry_dialog(account, cell["date"])
 

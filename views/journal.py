@@ -49,11 +49,12 @@ st.dataframe(
     styled,
     width="stretch",
     hide_index=True,
-    column_order=["entry_date", "outcome", "pnl", "screenshots", "notes_preview"],
+    column_order=["entry_date", "outcome", "pnl", "trade_count", "screenshots", "notes_preview"],
     column_config={
         "entry_date": st.column_config.DateColumn("Date", format="MMM DD, YYYY"),
         "outcome": st.column_config.TextColumn("Outcome"),
         "pnl": st.column_config.NumberColumn("P&L", format="$%.2f"),
+        "trade_count": st.column_config.NumberColumn("Trades", width="small"),
         "screenshots": st.column_config.NumberColumn("Files", width="small"),
         "notes_preview": st.column_config.TextColumn("Notes", width="large"),
     },

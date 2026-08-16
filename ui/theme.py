@@ -5,26 +5,126 @@ account cards, calendar cells) used across views for a consistent,
 hand-styled look on top of Streamlit's defaults.
 """
 
+import base64
 import html
+import os
 
 import streamlit as st
 
-BG = "#0D0D0F"
-CARD_BG = "#17171A"
-BORDER = "rgba(255, 255, 255, 0.08)"
-TEXT_PRIMARY = "#F5F5F5"
-TEXT_SECONDARY = "#A1A1AA"
-ACCENT_SOFT = "#F4A6C1"
-ACCENT = "#E85D9E"
-ACCENT_HOVER = "#F070AC"
-ACCENT_LIGHT = "#FFD6E5"
-GOOD = "#22C55E"
-BAD = "#EF4444"
-NEUTRAL = "#A1A1AA"
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
+_LOGO_ICON_PATH = os.path.join(_PROJECT_ROOT, "docs", "logo-icon.png")
 
-GOOD_BG = "rgba(34, 197, 94, 0.12)"
-BAD_BG = "rgba(239, 68, 68, 0.12)"
-NEUTRAL_BG = "rgba(161, 161, 170, 0.12)"
+
+@st.cache_data
+def logo_icon_data_uri() -> str:
+    """Base64 data URI for the P&Loom icon mark — raw <img> tags in
+    st.markdown(unsafe_allow_html=True) can't reference local file paths
+    (Streamlit doesn't serve arbitrary project files over HTTP), so the
+    image bytes are inlined instead. Cached so the file is only read once
+    per server process, not on every rerun."""
+    with open(_LOGO_ICON_PATH, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+# Two full palettes, swapped per-request by apply_theme() based on the
+# viewer's actual active theme (st.context.theme.type — reflects OS/browser
+# "prefers-color-scheme" when the user hasn't overridden it, and Streamlit's
+# own theme picker when they have). Module-level names below default to the
+# dark set; apply_theme() overwrites them in place before anything else in
+# a run reads them, and every function in this file reads the bare names
+# (not a frozen import), so a single call at the top of app.py keeps
+# everything — CSS, HTML components, chart colors — in sync.
+_DARK = dict(
+    BG="#0D0D0F",
+    CARD_BG="#17171A",
+    BORDER="rgba(255, 255, 255, 0.08)",
+    TEXT_PRIMARY="#F5F5F5",
+    TEXT_SECONDARY="#A1A1AA",
+    ACCENT_SOFT="#F4A6C1",
+    ACCENT="#E85D9E",
+    ACCENT_HOVER="#F070AC",
+    ACCENT_LIGHT="#FFD6E5",
+    ON_ACCENT="#0D0D0F",
+    GOOD="#22C55E",
+    BAD="#EF4444",
+    NEUTRAL="#A1A1AA",
+    GOOD_BG="rgba(34, 197, 94, 0.12)",
+    BAD_BG="rgba(239, 68, 68, 0.12)",
+    NEUTRAL_BG="rgba(161, 161, 170, 0.12)",
+)
+
+_LIGHT = dict(
+    BG="#FAFAFA",
+    CARD_BG="#FFFFFF",
+    BORDER="rgba(0, 0, 0, 0.08)",
+    TEXT_PRIMARY="#111114",
+    TEXT_SECONDARY="#6B6B76",
+    ACCENT_SOFT="#D6478C",
+    ACCENT="#D6478C",
+    ACCENT_HOVER="#B93C74",
+    ACCENT_LIGHT="#FFE3ED",
+    ON_ACCENT="#0D0D0F",
+    GOOD="#16A34A",
+    BAD="#DC2626",
+    NEUTRAL="#71717A",
+    GOOD_BG="rgba(22, 163, 74, 0.10)",
+    BAD_BG="rgba(220, 38, 38, 0.10)",
+    NEUTRAL_BG="rgba(113, 113, 122, 0.10)",
+)
+
+# Safe defaults (dark) until apply_theme() runs.
+BG = _DARK["BG"]
+CARD_BG = _DARK["CARD_BG"]
+BORDER = _DARK["BORDER"]
+TEXT_PRIMARY = _DARK["TEXT_PRIMARY"]
+TEXT_SECONDARY = _DARK["TEXT_SECONDARY"]
+ACCENT_SOFT = _DARK["ACCENT_SOFT"]
+ACCENT = _DARK["ACCENT"]
+ACCENT_HOVER = _DARK["ACCENT_HOVER"]
+ACCENT_LIGHT = _DARK["ACCENT_LIGHT"]
+ON_ACCENT = _DARK["ON_ACCENT"]
+GOOD = _DARK["GOOD"]
+BAD = _DARK["BAD"]
+NEUTRAL = _DARK["NEUTRAL"]
+GOOD_BG = _DARK["GOOD_BG"]
+BAD_BG = _DARK["BAD_BG"]
+NEUTRAL_BG = _DARK["NEUTRAL_BG"]
+
+CURRENT_MODE = "dark"
+
+
+_SESSION_KEY = "_theme_mode"
+
+
+def apply_theme() -> str:
+    """Detects the viewer's active theme and updates every color name in
+    this module to match. Call once, at the very top of app.py, before
+    inject_css() or anything else that reads a color. Returns "dark" or
+    "light" (also stored as CURRENT_MODE) in case a caller needs to branch
+    on it directly (e.g. Plotly template choice).
+
+    st.context.theme.type only reflects the browser's real
+    prefers-color-scheme on a session's very first script run — confirmed
+    empirically, not a guess: on every later rerun (which includes every
+    st.navigation page switch, since those go over the same WebSocket
+    rather than reloading the page) it silently reports a different,
+    wrong value. So the first good reading is cached in session_state and
+    reused for the rest of the session instead of re-trusting it each run.
+    """
+    global CURRENT_MODE
+    cached = st.session_state.get(_SESSION_KEY)
+    if cached in ("light", "dark"):
+        mode = cached
+    else:
+        try:
+            theme_type = st.context.theme.type
+        except Exception:
+            theme_type = None
+        mode = theme_type if theme_type in ("light", "dark") else "dark"
+        st.session_state[_SESSION_KEY] = mode
+    globals().update(_LIGHT if mode == "light" else _DARK)
+    CURRENT_MODE = mode
+    return mode
 
 # Curated palette for account color-coding — small, harmonious, colorblind-
 # distinct set (borrowed from the categorical hues used elsewhere), pink
@@ -156,11 +256,11 @@ def inject_css() -> None:
             background-color: {ACCENT};
         }}
         [data-testid="stSidebarNavLink"][aria-current="page"] span {{
-            color: {BG} !important;
+            color: {ON_ACCENT} !important;
             font-weight: 700;
         }}
         [data-testid="stSidebarNavLink"][aria-current="page"] svg {{
-            fill: {BG} !important;
+            fill: {ON_ACCENT} !important;
         }}
 
         .tj-brand {{
@@ -170,17 +270,11 @@ def inject_css() -> None:
             padding: 4px 12px 16px 12px;
             border-bottom: 1px solid {BORDER};
         }}
-        .tj-brand-mark {{
-            width: 32px;
-            height: 32px;
+        .tj-brand-mark-img {{
+            width: 34px;
+            height: 34px;
             border-radius: 9px;
-            background: {ACCENT};
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 800;
-            color: {BG};
-            font-size: 0.95rem;
+            object-fit: cover;
             flex-shrink: 0;
         }}
         .tj-brand-name {{
@@ -261,7 +355,7 @@ def inject_css() -> None:
         /* Buttons */
         .stButton > button, .stFormSubmitButton > button {{
             background-color: {ACCENT};
-            color: {BG};
+            color: {ON_ACCENT};
             border: none;
             border-radius: 10px;
             font-weight: 600;
@@ -272,7 +366,7 @@ def inject_css() -> None:
         .stButton > button:hover, .stFormSubmitButton > button:hover,
         .stButton > button:focus:not(:active), .stFormSubmitButton > button:focus:not(:active) {{
             background-color: {ACCENT_HOVER};
-            color: {BG};
+            color: {ON_ACCENT};
         }}
         .stButton > button[kind="secondary"] {{
             background-color: transparent;
@@ -299,6 +393,8 @@ def inject_css() -> None:
             border: 1px solid {BORDER};
             border-radius: 16px;
             padding: 20px 22px;
+            min-height: 230px;
+            box-sizing: border-box;
             transition: border-color 0.15s ease, transform 0.15s ease;
         }}
         [class*="st-key-acct-"]:hover {{
@@ -315,10 +411,25 @@ def inject_css() -> None:
         [class*="st-key-shot-"]:hover {{
             border-color: rgba(232, 93, 158, 0.35);
         }}
+        [class*="st-key-calday-"] {{
+            border-radius: 10px;
+            padding: 3px;
+            box-sizing: border-box;
+        }}
         [class*="st-key-calday-"] button {{
             width: 100%;
-            border-radius: 10px !important;
-            font-weight: 700 !important;
+            border-radius: 8px !important;
+            background-color: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 7px 0 !important;
+            white-space: pre-line !important;
+            line-height: 1.6 !important;
+        }}
+        [class*="st-key-calday-"] button p {{
+            font-size: 0.72rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
         }}
 
         .tj-page-header {{
@@ -466,6 +577,10 @@ def inject_css() -> None:
             border-left: 3px solid {TEXT_SECONDARY};
             border-radius: 12px;
             padding: 16px 18px;
+            min-height: 118px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
             transition: transform 0.15s ease, border-color 0.15s ease;
         }}
         .tj-stat:hover {{
@@ -682,13 +797,6 @@ def inject_css() -> None:
             height: 8px;
             border-radius: 3px;
         }}
-        .tj-cal-pnl {{
-            text-align: center;
-            font-size: 0.66rem;
-            font-weight: 700;
-            margin-top: 2px;
-            font-variant-numeric: tabular-nums;
-        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -715,9 +823,15 @@ def calendar_cell_css(cells: list) -> str:
         else:
             bg, border, color = CARD_BG, BORDER, TEXT_SECONDARY
         ring = f"box-shadow: inset 0 0 0 2px {ACCENT};" if cell["is_today"] else ""
+        # Background/border go on the container (the whole cell "box"), not
+        # the button, so the box's painted area always exactly matches what
+        # Streamlit itself sizes the container to — the day number and P&L
+        # amount are both inside the SAME button label (see calendar_widget),
+        # so there's only one Streamlit-measured element per cell, not two.
         rules.append(
-            f'.st-key-calday-{key} button {{ background-color: {bg} !important; '
-            f'border: 1px solid {border} !important; color: {color} !important; {ring} }}'
+            f'.st-key-calday-{key} {{ background-color: {bg} !important; '
+            f'border: 1px solid {border} !important; {ring} }} '
+            f'.st-key-calday-{key} button {{ color: {color} !important; }}'
         )
     return f"<style>{' '.join(rules)}</style>"
 
