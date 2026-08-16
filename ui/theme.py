@@ -1,7 +1,8 @@
 """
 Design system for the trading journal: color tokens, global CSS injection,
-and small HTML component builders (stat cards, tags, badges) used across
-views for a consistent, hand-styled look on top of Streamlit's defaults.
+and small HTML component builders (stat cards, tags, badges, progress bars,
+account cards, calendar cells) used across views for a consistent,
+hand-styled look on top of Streamlit's defaults.
 """
 
 import html
@@ -23,6 +24,12 @@ NEUTRAL = "#A1A1AA"
 
 GOOD_BG = "rgba(34, 197, 94, 0.12)"
 BAD_BG = "rgba(239, 68, 68, 0.12)"
+NEUTRAL_BG = "rgba(161, 161, 170, 0.12)"
+
+# Curated palette for account color-coding — small, harmonious, colorblind-
+# distinct set (borrowed from the categorical hues used elsewhere), pink
+# reserved as the app's own default so a fresh account matches the brand.
+ACCOUNT_COLORS = ["#E85D9E", "#2A78D6", "#1BAF7A", "#EDA100", "#4A3AA7", "#A1A1AA"]
 
 # Minimal stroke-style icon set (Feather-icon path data, MIT-licensed shapes)
 # rendered inline so cards don't depend on an external icon font loading.
@@ -37,6 +44,17 @@ _ICON_PATHS = {
     "book": '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>',
     "layers": '<polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline>',
     "pulse": '<circle cx="12" cy="12" r="10"></circle><polyline points="8 12 10.5 14.5 12 9 13.5 15 16 12"></polyline>',
+    "calendar": '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line>',
+    "image": '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline>',
+    "users": '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>',
+    "upload": '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>',
+    "trash": '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>',
+    "edit": '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>',
+    "chevron-down": '<polyline points="6 9 12 15 18 9"></polyline>',
+    "wallet": '<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path>',
+    "flame": '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path>',
+    "flag": '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line>',
+    "shield": '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>',
 }
 
 
@@ -91,10 +109,13 @@ def inject_css() -> None:
     st.markdown(
         f"""
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
 
         html, body, button, input, select, textarea {{
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }}
+        .tj-display {{
+            font-family: 'Space Grotesk', 'Inter', sans-serif;
         }}
 
         [data-testid="stAppViewContainer"], .stApp {{
@@ -210,6 +231,32 @@ def inject_css() -> None:
             font-size: 0.82rem;
             font-variant-numeric: tabular-nums;
         }}
+        .tj-side-account {{
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            padding: 10px 12px;
+            margin: 4px 8px;
+            border-radius: 10px;
+            background: {CARD_BG};
+            border: 1px solid {BORDER};
+        }}
+        .tj-side-account-dot {{
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }}
+        .tj-side-account-name {{
+            color: {TEXT_PRIMARY};
+            font-weight: 700;
+            font-size: 0.8rem;
+            line-height: 1.2;
+        }}
+        .tj-side-account-size {{
+            color: {TEXT_SECONDARY};
+            font-size: 0.7rem;
+        }}
 
         /* Buttons */
         .stButton > button, .stFormSubmitButton > button {{
@@ -241,9 +288,38 @@ def inject_css() -> None:
             border-radius: 10px;
         }}
 
-        /* Cards (via st.container(key=...)) */
+        /* Cards (via st.container(key=...)) — fixed, known-in-advance keys */
         {" ".join(f'.st-key-{key} {{ background-color: {CARD_BG}; border: 1px solid {BORDER}; border-radius: 16px; padding: 22px 24px; margin-bottom: 4px; transition: border-color 0.15s ease; }}' for key in CARD_KEYS)}
         {" ".join(f'.st-key-{key}:hover {{ border-color: rgba(232, 93, 158, 0.35); }}' for key in CARD_KEYS)}
+
+        /* Cards with dynamic, data-driven keys (account id, screenshot id, ...) —
+           matched by prefix since the exact key set isn't known up front. */
+        [class*="st-key-acct-"] {{
+            background-color: {CARD_BG};
+            border: 1px solid {BORDER};
+            border-radius: 16px;
+            padding: 20px 22px;
+            transition: border-color 0.15s ease, transform 0.15s ease;
+        }}
+        [class*="st-key-acct-"]:hover {{
+            border-color: rgba(232, 93, 158, 0.35);
+            transform: translateY(-2px);
+        }}
+        [class*="st-key-shot-"] {{
+            background-color: {CARD_BG};
+            border: 1px solid {BORDER};
+            border-radius: 14px;
+            padding: 10px;
+            transition: border-color 0.15s ease;
+        }}
+        [class*="st-key-shot-"]:hover {{
+            border-color: rgba(232, 93, 158, 0.35);
+        }}
+        [class*="st-key-calday-"] button {{
+            width: 100%;
+            border-radius: 10px !important;
+            font-weight: 700 !important;
+        }}
 
         .tj-page-header {{
             display: flex;
@@ -263,8 +339,9 @@ def inject_css() -> None:
             flex-shrink: 0;
         }}
         .tj-page-header-title {{
+            font-family: 'Space Grotesk', 'Inter', sans-serif;
             font-size: 1.5rem;
-            font-weight: 800;
+            font-weight: 700;
             color: {TEXT_PRIMARY};
             line-height: 1.2;
         }}
@@ -312,12 +389,17 @@ def inject_css() -> None:
             overflow: hidden;
         }}
 
-        /* Forms */
+        /* Forms & dialogs */
         [data-testid="stForm"] {{
             background-color: {CARD_BG};
             border: 1px solid {BORDER};
             border-radius: 16px;
             padding: 1.75rem 1.75rem 1.25rem 1.75rem;
+        }}
+        [data-testid="stDialog"] [role="dialog"] {{
+            background-color: {CARD_BG};
+            border: 1px solid {BORDER};
+            border-radius: 18px;
         }}
 
         /* Expander */
@@ -361,6 +443,11 @@ def inject_css() -> None:
         }}
         [data-testid="stTextArea"] textarea {{
             border-radius: 8px;
+        }}
+        [data-testid="stFileUploader"] section {{
+            background-color: {CARD_BG};
+            border: 1px dashed {BORDER};
+            border-radius: 12px;
         }}
 
         hr {{
@@ -409,6 +496,7 @@ def inject_css() -> None:
             flex-shrink: 0;
         }}
         .tj-stat-value {{
+            font-family: 'Space Grotesk', 'Inter', sans-serif;
             font-size: 1.55rem;
             font-weight: 700;
             font-variant-numeric: tabular-nums;
@@ -456,9 +544,22 @@ def inject_css() -> None:
             font-weight: 700;
             letter-spacing: 0.02em;
         }}
-        .tj-badge-long {{ color: {GOOD}; background: {GOOD_BG}; }}
-        .tj-badge-short {{ color: {BAD}; background: {BAD_BG}; }}
-        .tj-badge-open {{ color: {ACCENT}; background: rgba(232, 93, 158, 0.12); }}
+        .tj-badge-good {{ color: {GOOD}; background: {GOOD_BG}; }}
+        .tj-badge-bad {{ color: {BAD}; background: {BAD_BG}; }}
+        .tj-badge-neutral {{ color: {TEXT_SECONDARY}; background: {NEUTRAL_BG}; }}
+        .tj-badge-accent {{ color: {ACCENT}; background: rgba(232, 93, 158, 0.12); }}
+
+        .tj-progress-track {{
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 999px;
+            overflow: hidden;
+        }}
+        .tj-progress-fill {{
+            height: 100%;
+            border-radius: 999px;
+        }}
 
         .tj-table {{
             width: 100%;
@@ -499,22 +600,140 @@ def inject_css() -> None:
             font-size: 1.1rem;
             margin-bottom: 6px;
         }}
+
+        /* Account card */
+        .tj-acct-top {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 14px;
+        }}
+        .tj-acct-dot {{
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }}
+        .tj-acct-name {{
+            font-family: 'Space Grotesk', 'Inter', sans-serif;
+            font-weight: 700;
+            font-size: 1.02rem;
+            color: {TEXT_PRIMARY};
+        }}
+        .tj-acct-firm {{
+            font-size: 0.76rem;
+            color: {TEXT_SECONDARY};
+        }}
+        .tj-acct-balance {{
+            font-family: 'Space Grotesk', 'Inter', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: {TEXT_PRIMARY};
+            font-variant-numeric: tabular-nums;
+            margin-bottom: 2px;
+        }}
+        .tj-acct-row {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            padding: 5px 0;
+            border-top: 1px solid {BORDER};
+        }}
+        .tj-acct-row-label {{ color: {TEXT_SECONDARY}; }}
+        .tj-acct-row-value {{ font-weight: 600; font-variant-numeric: tabular-nums; }}
+
+        /* Calendar */
+        .tj-cal-nav {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }}
+        .tj-cal-month {{
+            font-family: 'Space Grotesk', 'Inter', sans-serif;
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: {TEXT_PRIMARY};
+        }}
+        .tj-cal-weekday {{
+            text-align: center;
+            color: {TEXT_SECONDARY};
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 700;
+            padding-bottom: 8px;
+        }}
+        .tj-cal-legend {{
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-top: 14px;
+            font-size: 0.75rem;
+            color: {TEXT_SECONDARY};
+        }}
+        .tj-cal-legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .tj-cal-legend-dot {{
+            width: 8px;
+            height: 8px;
+            border-radius: 3px;
+        }}
+        .tj-cal-pnl {{
+            text-align: center;
+            font-size: 0.66rem;
+            font-weight: 700;
+            margin-top: 2px;
+            font-variant-numeric: tabular-nums;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-# Container keys that should render as cards — CSS rules are generated for
-# each of these from a single source of truth so views only need to pass a
-# matching `key=` to st.container().
+def calendar_cell_css(cells: list) -> str:
+    """One small CSS rule per calendar day (~28-42 per month) so each button
+    can be colored by that day's outcome without per-instance inline style,
+    which Streamlit's rendered wrapper divs don't accept. Injected once per
+    calendar render, right before the grid — same technique CARD_KEYS uses
+    for the fixed containers, just data-driven instead of static."""
+    rules = []
+    for cell in cells:
+        key = cell["date"].isoformat()
+        if not cell["in_month"]:
+            bg, border, color = "transparent", "transparent", "rgba(161,161,170,0.35)"
+        elif cell["outcome"] == "Win":
+            bg, border, color = GOOD_BG, "rgba(34,197,94,0.35)", GOOD
+        elif cell["outcome"] == "Loss":
+            bg, border, color = BAD_BG, "rgba(239,68,68,0.35)", BAD
+        elif cell["outcome"] == "Breakeven":
+            bg, border, color = NEUTRAL_BG, "rgba(161,161,170,0.35)", TEXT_SECONDARY
+        else:
+            bg, border, color = CARD_BG, BORDER, TEXT_SECONDARY
+        ring = f"box-shadow: inset 0 0 0 2px {ACCENT};" if cell["is_today"] else ""
+        rules.append(
+            f'.st-key-calday-{key} button {{ background-color: {bg} !important; '
+            f'border: 1px solid {border} !important; color: {color} !important; {ring} }}'
+        )
+    return f"<style>{' '.join(rules)}</style>"
+
+
+# Fixed, known-in-advance container keys — see the dynamic (prefix-matched)
+# rules in inject_css for account cards, screenshot cards, and calendar cells.
 CARD_KEYS = [
     "stat-row",
-    "card-equity",
+    "card-balance",
+    "card-progress",
+    "card-calendar-preview",
+    "card-calendar-full",
     "card-distribution",
-    "card-strategy",
-    "card-recent-trades",
     "card-breakdown",
+    "card-drawdown",
+    "card-heatmap",
 ]
 
 
@@ -583,17 +802,51 @@ def sidebar_panel(label: str, rows: list) -> str:
     return f'<div class="tj-side-panel"><div class="tj-side-panel-label">{esc(label)}</div>{rows_html}</div>'
 
 
+def sidebar_account_chip(name: str, size_label: str, color: str) -> str:
+    return (
+        '<div class="tj-side-account">'
+        f'<div class="tj-side-account-dot" style="background:{color};"></div>'
+        f'<div><div class="tj-side-account-name">{esc(name)}</div>'
+        f'<div class="tj-side-account-size">{esc(size_label)}</div></div></div>'
+    )
+
+
 def tag(text: str, outline: bool = False) -> str:
     cls = "tj-tag-outline" if outline else "tj-tag"
     return f'<span class="{cls}">{esc(text)}</span>'
 
 
-def direction_badge(direction: str) -> str:
-    cls = "tj-badge-long" if direction == "Long" else "tj-badge-short"
-    return f'<span class="tj-badge {cls}">{direction}</span>'
+def outcome_badge(outcome: str | None) -> str:
+    if outcome == "Win":
+        return '<span class="tj-badge tj-badge-good">Win</span>'
+    if outcome == "Loss":
+        return '<span class="tj-badge tj-badge-bad">Loss</span>'
+    if outcome == "Breakeven":
+        return '<span class="tj-badge tj-badge-neutral">Breakeven</span>'
+    return ""
+
+
+def streak_badge(count: int, streak_type: str | None) -> str:
+    if not count or not streak_type:
+        return '<span class="tj-badge tj-badge-neutral">No streak</span>'
+    cls = "tj-badge-good" if streak_type == "Win" else "tj-badge-bad"
+    return f'<span class="tj-badge {cls}">{count} {esc(streak_type)} streak</span>'
 
 
 def status_badge(status: str) -> str:
-    if status == "Open":
-        return '<span class="tj-badge tj-badge-open">Open</span>'
-    return ""
+    mapping = {
+        "Active": "tj-badge-good",
+        "Passed": "tj-badge-accent",
+        "Failed": "tj-badge-bad",
+        "Archived": "tj-badge-neutral",
+    }
+    cls = mapping.get(status, "tj-badge-neutral")
+    return f'<span class="tj-badge {cls}">{esc(status)}</span>'
+
+
+def progress_bar(pct: float | None, color: str = ACCENT) -> str:
+    pct = 0 if pct is None else max(0.0, min(100.0, pct))
+    return (
+        '<div class="tj-progress-track">'
+        f'<div class="tj-progress-fill" style="width:{pct:.1f}%; background:{color};"></div></div>'
+    )

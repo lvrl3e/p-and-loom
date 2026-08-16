@@ -11,3 +11,6 @@ env/
 
 # Streamlit secrets (API keys, etc.) — never commit
 .streamlit/secrets.toml
+
+# Uploaded screenshots — local data, not shipped
+/uploads/

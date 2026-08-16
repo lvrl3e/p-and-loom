@@ -1,120 +1,78 @@
 import streamlit as st
 
-from data.db import init_db, get_all_trades, delete_trade
-from logic.calculations import add_calculated_columns
+from data.db import init_db, get_all_accounts, get_daily_entries, get_all_screenshots
+from logic import analytics
 from ui import theme
+from ui.account_selector import render_selector, selected_account_and_entries, get_selected_id, ALL_ACCOUNTS
+from ui.dialogs import daily_entry_dialog
+from ui.format import fmt_currency_signed
 
 init_db()
 
 st.markdown(
-    theme.page_header("Trade Journal", "Every trade you've logged, in one table", icon="book"),
+    theme.page_header("Daily Journal", "Every day you've logged, in one table", icon="book"),
     unsafe_allow_html=True,
 )
 
-trades = get_all_trades()
-
-if trades.empty:
-    st.info("No trades logged yet. Use **Add Trade** in the sidebar to log your first one.")
+accounts_df = get_all_accounts()
+if accounts_df.empty:
+    st.info("No accounts yet. Head to **Accounts** in the sidebar to add one.")
     st.stop()
 
-enriched = add_calculated_columns(trades)
+render_selector(accounts_df)
+account, starting_balance, entries = selected_account_and_entries(accounts_df, get_daily_entries)
 
-with st.expander("Filters", expanded=False):
-    fcol1, fcol2, fcol3, fcol4 = st.columns(4)
-    with fcol1:
-        tickers = fcol1.multiselect("Ticker", sorted(enriched["ticker"].unique()))
-    with fcol2:
-        strategies = fcol2.multiselect(
-            "Strategy", sorted(s for s in enriched["strategy"].dropna().unique())
-        )
-    with fcol3:
-        directions = fcol3.multiselect("Direction", ["Long", "Short"])
-    with fcol4:
-        statuses = fcol4.multiselect("Status", ["Open", "Closed"])
+if entries.empty:
+    st.info("No daily entries yet for this selection. Log one from the Dashboard or Calendar.")
+    st.stop()
 
-filtered = enriched.copy()
-if tickers:
-    filtered = filtered[filtered["ticker"].isin(tickers)]
-if strategies:
-    filtered = filtered[filtered["strategy"].isin(strategies)]
-if directions:
-    filtered = filtered[filtered["direction"].isin(directions)]
-if statuses:
-    filtered = filtered[filtered["status"].isin(statuses)]
+tagged = analytics.with_outcome(entries).sort_values("entry_date", ascending=False).copy()
 
-st.caption(f"Showing {len(filtered)} of {len(enriched)} trades")
+account_id = get_selected_id()
+shots_df = get_all_screenshots(None if account_id == ALL_ACCOUNTS else account_id)
+shot_counts = shots_df.groupby("daily_entry_id").size().to_dict() if not shots_df.empty else {}
+tagged["screenshots"] = tagged["id"].map(lambda i: shot_counts.get(i, 0))
+tagged["notes_preview"] = tagged["notes"].fillna("")
 
-display_cols = [
-    "id", "ticker", "direction", "status", "entry_date", "exit_date",
-    "entry_price", "exit_price", "position_size", "stop_loss",
-    "pnl_dollar", "pnl_pct", "holding_period_days", "r_multiple",
-    "strategy", "notes",
-]
+st.caption(f"Showing {len(tagged)} day(s)")
 
 
-def _signed_color(v) -> str:
+def _pnl_color(v) -> str:
     if v is None or v != v:
         return ""
-    color = theme.GOOD if v >= 0 else theme.BAD
-    return f"color: {color}; font-weight: 600;"
+    return f"color: {theme.pnl_color(v)}; font-weight: 600;"
 
 
-styled = (
-    filtered[display_cols]
-    .style.map(_signed_color, subset=["pnl_dollar", "pnl_pct", "r_multiple"])
-)
+styled = tagged.style.map(_pnl_color, subset=["pnl"])
 
 st.dataframe(
     styled,
     width="stretch",
     hide_index=True,
+    column_order=["entry_date", "outcome", "pnl", "screenshots", "notes_preview"],
     column_config={
-        "id": st.column_config.NumberColumn("ID", width="small"),
-        "ticker": st.column_config.TextColumn("Ticker"),
-        "direction": st.column_config.TextColumn("Direction"),
-        "status": st.column_config.TextColumn("Status"),
-        "entry_date": st.column_config.DateColumn("Entry Date"),
-        "exit_date": st.column_config.DateColumn("Exit Date"),
-        "entry_price": st.column_config.NumberColumn("Entry $", format="$%.2f"),
-        "exit_price": st.column_config.NumberColumn("Exit $", format="$%.2f"),
-        "position_size": st.column_config.NumberColumn("Size"),
-        "stop_loss": st.column_config.NumberColumn("Stop $", format="$%.2f"),
-        "pnl_dollar": st.column_config.NumberColumn("P&L $", format="$%.2f"),
-        "pnl_pct": st.column_config.NumberColumn("P&L %", format="%.2f%%"),
-        "holding_period_days": st.column_config.NumberColumn("Hold (days)", format="%.1f"),
-        "r_multiple": st.column_config.NumberColumn("R-Multiple", format="%.2fR"),
-        "strategy": st.column_config.TextColumn("Strategy"),
-        "notes": st.column_config.TextColumn("Notes", width="large"),
+        "entry_date": st.column_config.DateColumn("Date", format="MMM DD, YYYY"),
+        "outcome": st.column_config.TextColumn("Outcome"),
+        "pnl": st.column_config.NumberColumn("P&L", format="$%.2f"),
+        "screenshots": st.column_config.NumberColumn("Files", width="small"),
+        "notes_preview": st.column_config.TextColumn("Notes", width="large"),
     },
 )
 
 st.divider()
-st.markdown("##### Delete a trade")
+st.markdown("##### Edit a day")
 
-trade_options = {
-    f"#{row.id} — {row.ticker} ({row.direction}, {row.entry_date.date()})": row.id
-    for row in filtered.itertuples()
-}
-
-if trade_options:
+if account is None:
+    st.caption("Select a single account (not All Accounts) above to edit individual days.")
+else:
+    options = {
+        f"{row.entry_date.strftime('%b %d, %Y')} — {fmt_currency_signed(row.pnl)}": row.entry_date.date()
+        for row in tagged.itertuples()
+    }
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        selected_label = st.selectbox("Select trade", list(trade_options.keys()))
-    selected_id = trade_options[selected_label]
-
-    if st.session_state.get("confirm_delete_id") != selected_id:
-        with col_b:
-            st.write("")
-            if st.button("Delete", type="secondary"):
-                st.session_state["confirm_delete_id"] = selected_id
-                st.rerun()
-    else:
-        st.warning(f"Delete trade {selected_label}? This cannot be undone.")
-        c1, c2 = st.columns(2)
-        if c1.button("Confirm delete", type="primary"):
-            delete_trade(selected_id)
-            del st.session_state["confirm_delete_id"]
-            st.rerun()
-        if c2.button("Cancel", type="secondary"):
-            del st.session_state["confirm_delete_id"]
-            st.rerun()
+        label = st.selectbox("Select day", list(options.keys()))
+    with col_b:
+        st.write("")
+        if st.button("Edit", type="secondary", width="stretch"):
+            daily_entry_dialog(account, options[label])

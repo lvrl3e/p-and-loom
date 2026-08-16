@@ -2,10 +2,10 @@
 Plotly figure builders for the analytics dashboard.
 
 Colors follow the app's black/white/pink theme (see ui.theme): the accent
-pink carries the equity curve, green/red stay reserved for profit/loss —
-never reused for anything else — and chart chrome (gridlines, axis text)
-uses the muted secondary-text gray so figures blend into the dark card
-background they're rendered inside.
+pink carries the balance/equity curve, green/red stay reserved for
+profit/loss — never reused for anything else — and chart chrome
+(gridlines, axis text) uses the muted secondary-text gray so figures
+blend into the dark card background they're rendered inside.
 """
 
 import pandas as pd
@@ -29,38 +29,42 @@ _BASE_LAYOUT = dict(
 )
 
 
-def _empty_figure() -> go.Figure:
+def _empty_figure(message: str = "No entries yet") -> go.Figure:
     fig = go.Figure()
-    fig.add_annotation(text="No closed trades yet", showarrow=False, font=dict(color=MUTED))
+    fig.add_annotation(text=message, showarrow=False, font=dict(color=MUTED))
     fig.update_xaxes(visible=False)
     fig.update_yaxes(visible=False)
     fig.update_layout(**_BASE_LAYOUT, height=280)
     return fig
 
 
-def equity_curve_chart(equity_df: pd.DataFrame) -> go.Figure:
+def balance_chart(equity_df: pd.DataFrame, starting_balance: float) -> go.Figure:
+    """Account balance over time (starting_balance + cumulative daily P&L),
+    with a dashed starting-balance reference line — the natural baseline
+    for prop-firm profit targets and drawdown limits, both defined in
+    balance terms."""
     if equity_df.empty:
         return _empty_figure()
 
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=equity_df["exit_date"],
-            y=equity_df["cumulative_pnl"],
+            x=equity_df["entry_date"],
+            y=equity_df["balance"],
             mode="lines",
             line=dict(color=ACCENT, width=2.5, shape="spline", smoothing=0.3),
             fill="tozeroy",
             fillcolor="rgba(232, 93, 158, 0.14)",
-            hovertemplate="Cumulative P&L: <b>$%{y:,.2f}</b><extra></extra>",
-            name="Equity",
+            hovertemplate="Balance: <b>$%{y:,.2f}</b><extra></extra>",
+            name="Balance",
         )
     )
 
     last = equity_df.iloc[-1]
     fig.add_trace(
         go.Scatter(
-            x=[last["exit_date"]],
-            y=[last["cumulative_pnl"]],
+            x=[last["entry_date"]],
+            y=[last["balance"]],
             mode="markers",
             marker=dict(color=ACCENT, size=8, line=dict(color="#0D0D0F", width=2)),
             hoverinfo="skip",
@@ -68,9 +72,9 @@ def equity_curve_chart(equity_df: pd.DataFrame) -> go.Figure:
         )
     )
     fig.add_annotation(
-        x=last["exit_date"],
-        y=last["cumulative_pnl"],
-        text=f"${last['cumulative_pnl']:,.0f}",
+        x=last["entry_date"],
+        y=last["balance"],
+        text=f"${last['balance']:,.0f}",
         showarrow=False,
         yshift=18,
         font=dict(color=ACCENT, size=12, family="Inter, sans-serif"),
@@ -80,12 +84,16 @@ def equity_curve_chart(equity_df: pd.DataFrame) -> go.Figure:
         borderwidth=1,
     )
 
-    fig.add_hline(y=0, line_width=1, line_color=ZERO_LINE)
+    fig.add_hline(
+        y=starting_balance, line_width=1, line_dash="dot", line_color=ZERO_LINE,
+        annotation_text="Starting balance", annotation_font_color=MUTED, annotation_font_size=11,
+        annotation_position="top left",
+    )
     fig.update_layout(
         margin=dict(l=10, r=10, t=28, b=10),
         showlegend=False,
         xaxis_title=None,
-        yaxis_title="Cumulative P&L ($)",
+        yaxis_title="Balance ($)",
         hovermode="x unified",
         **_BASE_LAYOUT,
     )
@@ -98,13 +106,43 @@ def equity_curve_chart(equity_df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def pnl_distribution_chart(closed_df: pd.DataFrame) -> go.Figure:
-    if closed_df.empty:
+def drawdown_chart(drawdown_df: pd.DataFrame) -> go.Figure:
+    """Drawdown from the running peak balance over time — always <= 0."""
+    if drawdown_df.empty:
         return _empty_figure()
 
     fig = go.Figure()
-    wins = closed_df[closed_df["pnl_dollar"] > 0]["pnl_dollar"]
-    losses = closed_df[closed_df["pnl_dollar"] <= 0]["pnl_dollar"]
+    fig.add_trace(
+        go.Scatter(
+            x=drawdown_df["entry_date"],
+            y=drawdown_df["drawdown"],
+            mode="lines",
+            line=dict(color=BAD, width=2),
+            fill="tozeroy",
+            fillcolor="rgba(239, 68, 68, 0.14)",
+            hovertemplate="Drawdown: <b>$%{y:,.2f}</b><extra></extra>",
+        )
+    )
+    fig.add_hline(y=0, line_width=1, line_color=ZERO_LINE)
+    fig.update_layout(
+        margin=dict(l=10, r=10, t=10, b=10),
+        showlegend=False,
+        xaxis_title=None,
+        yaxis_title="Drawdown ($)",
+        **_BASE_LAYOUT,
+    )
+    fig.update_xaxes(showgrid=False, color=MUTED)
+    fig.update_yaxes(showgrid=True, gridcolor=GRIDLINE, zeroline=False, color=MUTED)
+    return fig
+
+
+def pnl_distribution_chart(df: pd.DataFrame, pnl_col: str = "pnl") -> go.Figure:
+    if df.empty:
+        return _empty_figure()
+
+    fig = go.Figure()
+    wins = df[df[pnl_col] > 0][pnl_col]
+    losses = df[df[pnl_col] <= 0][pnl_col]
 
     fig.add_trace(go.Histogram(x=wins, name="Win", marker_color=GOOD, opacity=0.85))
     fig.add_trace(go.Histogram(x=losses, name="Loss", marker_color=BAD, opacity=0.85))
@@ -119,8 +157,8 @@ def pnl_distribution_chart(closed_df: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         barmode="overlay",
         margin=dict(l=10, r=10, t=10, b=10),
-        xaxis_title="P&L per trade ($)",
-        yaxis_title="Number of trades",
+        xaxis_title="P&L per day ($)",
+        yaxis_title="Number of days",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, font=dict(color=TEXT_SECONDARY)),
         bargap=0.05,
         **_BASE_LAYOUT,

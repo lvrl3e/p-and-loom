@@ -69,6 +69,37 @@ CREATE TABLE IF NOT EXISTS screenshots (
 """
 
 
+def _nan_to_none(df: pd.DataFrame) -> pd.DataFrame:
+    """pandas.read_sql_query turns SQL NULL into float NaN. Column-level
+    operations (.fillna, .where, .notna on a Series) see this correctly
+    either way, but it's normalized here too for anything that reads a
+    whole column directly. Row-wise access is a separate problem — see
+    coalesce() below."""
+    return df.where(pd.notna(df), None)
+
+
+def coalesce(value, default=None):
+    """Returns default if value is None or NaN/NaT.
+
+    Necessary (not just defensive) because extracting a single row from a
+    DataFrame with mixed column dtypes (.iloc[i], .iterrows(), .to_dict()
+    on a row) re-coerces a stored None back into float NaN — confirmed
+    empirically, not just a theoretical edge case. NaN is truthy in Python,
+    so plain `value or default` / `if value:` checks silently do the wrong
+    thing on any nullable column (firm, profit_target, notes, ...) once
+    it's been through row-wise access. Use this instead, everywhere a
+    nullable field is read off a row/dict derived from one of this module's
+    DataFrames."""
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    return value
+
+
 @contextmanager
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -119,7 +150,8 @@ def delete_account(account_id: int) -> None:
 
 def get_all_accounts() -> pd.DataFrame:
     with get_connection() as conn:
-        return pd.read_sql_query("SELECT * FROM accounts ORDER BY created_at ASC, id ASC", conn)
+        df = pd.read_sql_query("SELECT * FROM accounts ORDER BY created_at ASC, id ASC", conn)
+    return _nan_to_none(df)
 
 
 def get_account(account_id: int) -> dict | None:
@@ -168,6 +200,7 @@ def get_daily_entries(account_id: int | None = None) -> pd.DataFrame:
             )
     if not df.empty:
         df["entry_date"] = pd.to_datetime(df["entry_date"], errors="coerce")
+        df["notes"] = df["notes"].where(df["notes"].notna(), None)
     return df
 
 
@@ -240,4 +273,5 @@ def get_all_screenshots(account_id: int | None = None) -> pd.DataFrame:
         df = pd.read_sql_query(query, conn, params=params)
     if not df.empty:
         df["entry_date"] = pd.to_datetime(df["entry_date"], errors="coerce")
+        df["notes"] = df["notes"].where(df["notes"].notna(), None)
     return df

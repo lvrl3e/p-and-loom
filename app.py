@@ -1,10 +1,8 @@
 import streamlit as st
 
-from data.db import init_db, get_all_trades
-from logic.calculations import add_calculated_columns
-from logic import analytics
+from data.db import init_db, get_all_accounts
 from ui import theme
-from ui.format import fmt_currency_signed, fmt_pct
+from ui.account_selector import ensure_selection, get_selected_id, ALL_ACCOUNTS
 
 st.set_page_config(page_title="Trading Journal", page_icon="📈", layout="wide")
 theme.inject_css()
@@ -25,31 +23,36 @@ with st.sidebar:
     )
 
 overview = st.Page("views/overview.py", title="Dashboard", icon=":material/space_dashboard:", default=True)
-add_trade = st.Page("views/add_trade.py", title="Add Trade", icon=":material/add_circle:")
-journal = st.Page("views/journal.py", title="Trade Journal", icon=":material/receipt_long:")
+accounts_page = st.Page("views/accounts.py", title="Accounts", icon=":material/account_balance_wallet:")
+journal = st.Page("views/journal.py", title="Daily Journal", icon=":material/receipt_long:")
+calendar_page = st.Page("views/calendar.py", title="Calendar", icon=":material/calendar_month:")
 analytics_page = st.Page("views/analytics.py", title="Analytics", icon=":material/insights:")
+screenshots_page = st.Page("views/screenshots.py", title="Screenshots", icon=":material/image:")
 
-pg = st.navigation([overview, add_trade, journal, analytics_page])
+pg = st.navigation([overview, accounts_page, journal, calendar_page, analytics_page, screenshots_page])
 
-trades = get_all_trades()
+accounts_df = get_all_accounts()
+ensure_selection(accounts_df)
+
 with st.sidebar:
-    if trades.empty:
+    selected_id = get_selected_id()
+    if accounts_df.empty:
         st.markdown(
-            theme.sidebar_panel("Snapshot", [("Trades logged", "0", theme.TEXT_PRIMARY)]),
+            theme.sidebar_panel("Snapshot", [("Accounts", "0", theme.TEXT_PRIMARY)]),
+            unsafe_allow_html=True,
+        )
+    elif selected_id == ALL_ACCOUNTS:
+        st.markdown(
+            theme.sidebar_account_chip("All Accounts", f"{len(accounts_df)} accounts", theme.ACCENT),
             unsafe_allow_html=True,
         )
     else:
-        stats = analytics.summary_stats(add_calculated_columns(trades))
-        st.markdown(
-            theme.sidebar_panel(
-                "Snapshot",
-                [
-                    ("Total P&L", fmt_currency_signed(stats["total_pnl"]), theme.pnl_color(stats["total_pnl"])),
-                    ("Win rate", fmt_pct(stats["win_rate"]), theme.ACCENT),
-                    ("Trades logged", str(len(trades)), theme.TEXT_PRIMARY),
-                ],
-            ),
-            unsafe_allow_html=True,
-        )
+        row = accounts_df[accounts_df["id"] == selected_id]
+        if not row.empty:
+            acct = row.iloc[0]
+            st.markdown(
+                theme.sidebar_account_chip(acct["name"], f"${acct['account_size']:,.0f} account", acct["color"]),
+                unsafe_allow_html=True,
+            )
 
 pg.run()

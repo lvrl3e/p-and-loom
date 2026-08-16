@@ -1,139 +1,132 @@
+import datetime as dt
+
+import pandas as pd
 import streamlit as st
 
-from data.db import get_all_trades
-from logic.calculations import add_calculated_columns
+from data.db import get_all_accounts, get_daily_entries
 from logic import analytics
 from ui import charts, theme
-from ui.format import fmt_currency, fmt_currency_signed, fmt_pct, fmt_ratio
+from ui.account_selector import render_selector, selected_account_and_entries, ALL_ACCOUNTS, get_selected_id
+from ui.calendar_widget import render_month
+from ui.dialogs import daily_entry_dialog
+from ui.format import fmt_currency_signed, fmt_pct
 
-header_col, btn_col = st.columns([5, 1])
-with header_col:
+accounts_df = get_all_accounts()
+
+hour = dt.datetime.now().hour
+greeting = "Good morning" if hour < 12 else ("Good afternoon" if hour < 18 else "Good evening")
+st.markdown(
+    f'<div class="tj-page-header-title" style="font-size:1.6rem;">{greeting}, Trader 👋</div>'
+    f'<div class="tj-page-header-sub" style="margin-bottom:1.25rem;">Here\'s your performance overview.</div>',
+    unsafe_allow_html=True,
+)
+
+if accounts_df.empty:
     st.markdown(
-        theme.page_header("Dashboard", "Overview of your trading performance", icon="pulse"),
+        """
+        <div class="tj-empty">
+            <div class="tj-empty-title">No accounts yet</div>
+            <div>Head to <b>Accounts</b> in the sidebar to add your first trading account.</div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
-with btn_col:
-    if st.button("＋ Add Trade", type="primary", width="stretch"):
-        st.switch_page("views/add_trade.py")
-
-trades = get_all_trades()
-
-if trades.empty:
-    with st.container(key="card-recent-trades"):
-        st.markdown(
-            """
-            <div class="tj-empty">
-                <div class="tj-empty-title">No trades logged yet</div>
-                <div>Log your first trade to start seeing performance analytics here.</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
     st.stop()
 
-enriched = add_calculated_columns(trades)
-stats = analytics.summary_stats(enriched)
-equity = analytics.equity_curve(enriched)
+sel_col, btn_col = st.columns([3, 1])
+with sel_col:
+    render_selector(accounts_df)
+with btn_col:
+    account_id = get_selected_id()
+    add_disabled = account_id == ALL_ACCOUNTS
+    if st.button("＋ Add Entry", type="primary", width="stretch", disabled=add_disabled):
+        row = accounts_df[accounts_df["id"] == account_id].iloc[0].to_dict()
+        daily_entry_dialog(row, dt.date.today())
 
-rr = stats["risk_reward_ratio"]
-rr_color = theme.TEXT_PRIMARY if rr is None else (theme.GOOD if rr >= 1 else theme.BAD)
-dd_color = theme.TEXT_PRIMARY if stats["max_drawdown"] == 0 else theme.BAD
-pnl_accent = theme.pnl_color(stats["total_pnl"])
+account, starting_balance, entries = selected_account_and_entries(accounts_df, get_daily_entries)
+stats = analytics.summary_stats(entries, starting_balance)
+equity = analytics.equity_curve(entries, starting_balance)
 
-open_count = int((enriched["status"] == "Open").sum())
-trades_sub = f"{open_count} open position(s)" if open_count else "All positions closed"
+best_day = stats["best_day"]
+best_day_value = fmt_currency_signed(best_day["pnl"]) if best_day is not None else "—"
 
 with st.container(key="stat-row"):
     cards = [
         theme.stat_card(
-            "Total P&L", fmt_currency_signed(stats["total_pnl"]), icon="dollar", accent=pnl_accent,
-            sub=f"{fmt_currency(stats['avg_pnl_per_trade'])} avg / trade",
-            spark=list(equity["cumulative_pnl"].tail(10)),
+            "Current Balance", f"${stats['current_balance']:,.2f}", icon="wallet", accent=theme.ACCENT,
+            sub=f"Started at ${stats['starting_balance']:,.0f}",
+        ),
+        theme.stat_card(
+            "Total P&L", fmt_currency_signed(stats["total_pnl"]), icon="dollar",
+            accent=theme.pnl_color(stats["total_pnl"]),
+            sub=f"{stats['pnl_pct']:+.2f}% return",
+            spark=list(equity["balance"].tail(10)),
         ),
         theme.stat_card(
             "Win Rate", fmt_pct(stats["win_rate"]), icon="target", accent=theme.ACCENT,
-            sub=f"{stats['win_count']} wins · {stats['loss_count']} losses",
+            sub=f"{stats['winning_days']} wins · {stats['losing_days']} losses",
         ),
         theme.stat_card(
-            "Number of Trades", str(stats["num_trades"]), icon="layers", accent=theme.NEUTRAL,
-            sub=trades_sub,
-        ),
-        theme.stat_card(
-            "Avg Win", fmt_currency(stats["avg_win"]), icon="trending-up", accent=theme.GOOD,
-            sub=f"Best: {fmt_currency(stats['best_trade'])}",
-        ),
-        theme.stat_card(
-            "Avg Loss", fmt_currency(stats["avg_loss"]), icon="trending-down", accent=theme.BAD,
-            sub=f"Worst: {fmt_currency(stats['worst_trade'])}",
-        ),
-        theme.stat_card(
-            "Risk-Reward Ratio", fmt_ratio(rr), icon="activity", accent=rr_color,
-            sub="Target ≥ 1.00R",
-        ),
-        theme.stat_card(
-            "Max Drawdown", fmt_currency(stats["max_drawdown"]), icon="alert-triangle", accent=dd_color,
-            sub="Peak-to-trough decline",
+            "Best Day", best_day_value, icon="trending-up", accent=theme.GOOD,
+            sub=best_day["entry_date"].strftime("%b %d, %Y") if best_day is not None else "No entries yet",
         ),
     ]
     st.markdown(theme.stat_grid(cards), unsafe_allow_html=True)
 
 st.write("")
 
-with st.container(key="card-equity"):
-    st.markdown(theme.card_header("Equity Curve", "Cumulative realized P&L over time", icon="trending-up"), unsafe_allow_html=True)
-    st.plotly_chart(charts.equity_curve_chart(equity), width="stretch", theme="streamlit", config=charts.PLOTLY_CONFIG)
+RANGE_OPTIONS = {"7D": 7, "1M": 30, "3M": 90, "6M": 180, "1Y": 365, "All": None}
 
-col1, col2 = st.columns(2)
-with col1:
-    with st.container(key="card-distribution"):
-        st.markdown(theme.card_header("Win / Loss Distribution", "Spread of P&L across closed trades", icon="bars"), unsafe_allow_html=True)
-        closed = analytics.closed_trades(enriched)
-        st.plotly_chart(charts.pnl_distribution_chart(closed), width="stretch", theme="streamlit", config=charts.PLOTLY_CONFIG)
-with col2:
-    with st.container(key="card-strategy"):
-        st.markdown(theme.card_header("Performance by Strategy", "Which setups are actually working", icon="target"), unsafe_allow_html=True)
-        perf_strategy = analytics.performance_by(enriched, "strategy")
-        st.plotly_chart(charts.performance_bar_chart(perf_strategy, "strategy"), width="stretch", theme="streamlit", config=charts.PLOTLY_CONFIG)
+col_chart, col_progress = st.columns([2, 1])
+with col_chart:
+    with st.container(key="card-balance"):
+        header_c, range_c = st.columns([3, 3])
+        with header_c:
+            st.markdown(theme.card_header("Performance", "Account balance over time", icon="trending-up"), unsafe_allow_html=True)
+        with range_c:
+            range_choice = st.segmented_control(
+                "Range", list(RANGE_OPTIONS.keys()), default="All", key="balance_range", label_visibility="collapsed"
+            )
+        days = RANGE_OPTIONS.get(range_choice or "All")
+        chart_equity = equity
+        if days and not equity.empty:
+            cutoff = pd.Timestamp(dt.date.today() - dt.timedelta(days=days))
+            chart_equity = equity[equity["entry_date"] >= cutoff]
+        st.plotly_chart(charts.balance_chart(chart_equity, starting_balance), width="stretch", theme="streamlit", config=charts.PLOTLY_CONFIG)
+with col_progress:
+    with st.container(key="card-progress"):
+        st.markdown(theme.card_header("Prop-Firm Progress", icon="flag"), unsafe_allow_html=True)
+        if account is None:
+            st.caption("Select a single account to see profit-target and drawdown progress.")
+        else:
+            progress = analytics.prop_firm_progress(stats, account)
+            if progress["profit_target"]:
+                st.markdown(
+                    f'<div class="tj-stat-sub" style="margin-bottom:6px;">Profit Target — '
+                    f'${stats["total_pnl"]:,.0f} / ${progress["profit_target"]:,.0f}</div>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown(theme.progress_bar(progress["target_progress_pct"], theme.GOOD), unsafe_allow_html=True)
+                st.caption(f"{progress['target_progress_pct']:.1f}% · ${progress['remaining_to_target']:,.0f} remaining")
+            else:
+                st.caption("No profit target set for this account.")
 
+            st.write("")
+            if progress["max_drawdown_limit"]:
+                st.markdown(
+                    f'<div class="tj-stat-sub" style="margin-bottom:6px;">Drawdown — '
+                    f'${abs(stats["max_drawdown"]):,.0f} / ${progress["max_drawdown_limit"]:,.0f}</div>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown(theme.progress_bar(progress["drawdown_used_pct"], theme.BAD), unsafe_allow_html=True)
+                st.caption(f"${progress['distance_to_drawdown']:,.0f} of room left")
+            else:
+                st.caption("No drawdown limit set for this account.")
 
-def _recent_trades_html(df) -> str:
-    rows = []
-    for r in df.itertuples():
-        has_pnl = r.pnl_dollar == r.pnl_dollar  # not NaN
-        pnl_html = (
-            f'<span style="color:{theme.pnl_color(r.pnl_dollar)}; font-weight:700;">{fmt_currency_signed(r.pnl_dollar)}</span>'
-            if has_pnl
-            else '<span class="tj-muted">—</span>'
-        )
-        has_exit = r.exit_price == r.exit_price
-        exit_html = fmt_currency(r.exit_price) if has_exit else "—"
-        status_html = theme.status_badge(r.status)
-        strategy_html = theme.tag(r.strategy) if isinstance(r.strategy, str) and r.strategy else ""
+st.write("")
 
-        # Single line, no blank/whitespace-only lines — see note in ui.theme.stat_card.
-        rows.append(
-            f'<tr><td style="font-weight:700;">{theme.esc(r.ticker)}</td>'
-            f"<td>{theme.direction_badge(r.direction)} {status_html}</td>"
-            f'<td class="tj-muted">{fmt_currency(r.entry_price)}</td>'
-            f'<td class="tj-muted">{exit_html}</td>'
-            f"<td>{pnl_html}</td>"
-            f"<td>{strategy_html}</td>"
-            f'<td class="tj-muted">{r.entry_date.strftime("%b %d, %Y")}</td></tr>'
-        )
-
-    header = (
-        "<thead><tr><th>Ticker</th><th>Direction</th><th>Entry</th><th>Exit</th>"
-        "<th>P&amp;L</th><th>Strategy</th><th>Date</th></tr></thead>"
-    )
-    return f'<table class="tj-table">{header}<tbody>{"".join(rows)}</tbody></table>'
-
-
-with st.container(key="card-recent-trades"):
-    header_col, link_col = st.columns([5, 1])
-    with header_col:
-        st.markdown(theme.card_header("Recent Trades", icon="book"), unsafe_allow_html=True)
-    with link_col:
-        st.page_link("views/journal.py", label="View all →")
-
-    recent = enriched.sort_values(["entry_date", "id"], ascending=False).head(6)
-    st.markdown(_recent_trades_html(recent), unsafe_allow_html=True)
+with st.container(key="card-calendar-preview"):
+    today = dt.date.today()
+    st.markdown(theme.card_header("This Month", today.strftime("%B %Y"), icon="calendar"), unsafe_allow_html=True)
+    weeks = analytics.calendar_matrix(entries, today.year, today.month, today)
+    render_month(weeks, account)
