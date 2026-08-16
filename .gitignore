@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Local database — do not ship real trade data to a public repo
+*.db
+*.sqlite
+*.sqlite3
+
+# Streamlit secrets (API keys, etc.) — never commit
+.streamlit/secrets.toml
