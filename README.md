@@ -1,100 +1,295 @@
 # Trading Journal
 
-A Streamlit app for logging trades and tracking what's actually working:
-win rate, risk-reward, equity curve, and performance broken down by
-strategy, ticker, month, and day of week.
+A modern **trading performance journal built for prop-firm and funded-account traders**. Track multiple trading accounts, log daily profit and loss, review performance through a calendar, and keep notes and screenshots for every trading day.
 
-## Features
+![Trading Journal Dashboard](docs/screenshots/dashboard.png)
 
-- **Log trades**: ticker, direction, entry/exit price, position size,
-  entry/exit date, optional stop-loss, strategy tag, notes.
-- **Auto-calculated metrics** per trade: P&L ($ and %), holding period,
-  R-multiple (when a stop-loss is logged).
-- **Aggregate analytics**: win rate, avg win/loss, risk-reward ratio,
-  total P&L, max drawdown, and performance by strategy/ticker/month/day
-  of week.
-- **Visualizations**: equity curve, win/loss distribution, performance by
-  strategy bar chart.
-- **Journal table** with filters and delete support.
+## ✨ Features
 
-## Project structure
+### 🏦 Multiple Trading Accounts
 
-```
+Create and manage multiple accounts with different account sizes.
+
+* Prop-firm accounts
+* Funded accounts
+* Personal trading accounts
+* Different starting balances
+* Separate performance tracking per account
+* Easily switch between accounts from the dashboard
+
+### 📅 Daily P&L Journal
+
+Instead of recording individual trades, quickly log your **overall result for the day**.
+
+For each date, record:
+
+* Daily profit or loss
+* Notes
+* Screenshots
+* Trading-day observations
+
+Positive, negative, and break-even days are automatically identified.
+
+### 🗓️ Performance Calendar
+
+View your entire trading history through a visual calendar.
+
+Each day displays its performance using visual indicators:
+
+* 🟢 Profit
+* 🔴 Loss
+* ⚪ Break-even
+* Dark/empty days for days without an entry
+
+Click any date to view or edit the day's P&L, notes, and screenshots.
+
+### 📊 Performance Analytics
+
+Automatically calculate performance metrics for each account:
+
+* Current balance
+* Total P&L
+* P&L percentage
+* Winning days
+* Losing days
+* Break-even days
+* Win rate
+* Average daily profit
+* Average daily loss
+* Best day
+* Worst day
+* Winning streak
+* Losing streak
+* Maximum drawdown
+
+### 🎯 Prop-Firm Progress
+
+Track important account milestones such as:
+
+* Profit target
+* Progress toward target
+* Remaining profit needed
+* Maximum drawdown
+* Current drawdown
+* Distance to drawdown limit
+
+This makes it easy to see how close an account is to reaching its target while keeping risk under control.
+
+### 📈 Equity & P&L Charts
+
+Visualize account performance with:
+
+* Cumulative P&L
+* Equity curve
+* Daily performance
+* Drawdown
+* Monthly performance
+
+Filter performance by different time periods such as:
+
+`7D · 1M · 3M · 6M · 1Y · All`
+
+### 📝 Daily Notes
+
+Keep a journal for each trading day.
+
+Record things such as:
+
+* Market observations
+* Trading psychology
+* Mistakes
+* Lessons learned
+* Strategy observations
+* Goals for the next session
+
+### 📸 Trading Screenshots
+
+Attach screenshots to individual journal entries.
+
+Useful for saving:
+
+* TradingView charts
+* Trading platform screenshots
+* Prop-firm dashboards
+* Performance screenshots
+* Important market setups
+
+## 🎨 Design
+
+Trading Journal uses a **dark trading-terminal inspired interface** with a modern SaaS aesthetic.
+
+* Dark UI
+* Pink accent color
+* Green profit indicators
+* Red loss indicators
+* Minimal cards and borders
+* Responsive layouts
+* Data-focused visualizations
+
+## 📁 Project Structure
+
+```text
 Trading-Journal/
-├── app.py                  # Home page: quick summary + nav
-├── pages/
-│   ├── 1_➕_Add_Trade.py    # Trade entry form
-│   ├── 2_📒_Journal.py      # Full journal table, filters, delete
-│   └── 3_📊_Dashboard.py    # Analytics + charts
+├── app.py
+│
+├── views/
+│   ├── overview.py
+│   ├── accounts.py
+│   ├── journal.py
+│   ├── calendar.py
+│   └── analytics.py
+│
 ├── data/
-│   └── db.py                # SQLite data access layer (CRUD)
+│   └── db.py
+│
 ├── logic/
-│   ├── calculations.py      # Per-trade metrics (P&L, R-multiple, ...)
-│   └── analytics.py         # Aggregate stats (win rate, drawdown, ...)
+│   ├── calculations.py
+│   └── analytics.py
+│
 ├── ui/
-│   ├── charts.py             # Plotly figure builders
-│   └── format.py             # Display formatting helpers
-└── requirements.txt
+│   ├── theme.py
+│   ├── charts.py
+│   └── format.py
+│
+├── docs/
+│   └── screenshots/
+│       └── dashboard.png
+│
+├── requirements.txt
+└── README.md
 ```
 
-The data layer (`data/db.py`), calculation logic (`logic/`), and UI
-(`pages/`, `ui/`) are kept separate so each can evolve independently —
-e.g. swapping SQLite for Postgres only means rewriting `data/db.py`.
+## 🧮 How It Works
 
-## Running locally
+The application is focused on **daily account-level performance rather than individual trade execution**.
+
+A typical workflow is:
+
+```text
+Create Account
+      ↓
+Select Account
+      ↓
+Select Trading Date
+      ↓
+Enter Daily P&L
+      ↓
+Add Notes
+      ↓
+Upload Screenshots
+      ↓
+Save Journal Entry
+      ↓
+Analytics Automatically Update
+```
+
+For example:
+
+```text
+Account: FTMO Challenge
+Account Size: $100,000
+
+May 19
+Daily P&L: +$450
+
+May 20
+Daily P&L: -$120
+
+May 21
+Daily P&L: +$700
+```
+
+The dashboard automatically calculates the account's updated performance from these daily entries.
+
+## 🛠️ Tech Stack
+
+* **Python**
+* **Streamlit**
+* **SQLite**
+* **Plotly**
+* **Pandas**
+
+The project keeps the data layer, calculations, analytics, and UI separated so individual components can be modified without restructuring the entire application.
+
+## 🚀 Running Locally
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/<your-username>/<repository-name>.git
+cd Trading-Journal
+```
+
+### 2. Create a virtual environment
+
+**Windows:**
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # macOS/Linux
-
-pip install -r requirements.txt
-streamlit run app.py
+.venv\Scripts\activate
 ```
 
-The app creates `trading_journal.db` (SQLite) in the project root on
-first run and persists trades there between sessions.
+**macOS/Linux:**
 
-## Deploying to Streamlit Community Cloud
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
 
-1. **Push this repo to GitHub** (create a new repo if you haven't yet):
+### 3. Install dependencies
 
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin https://github.com/<your-username>/<repo-name>.git
-   git push -u origin main
-   ```
+```bash
+pip install -r requirements.txt
+```
 
-2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in
-   with GitHub.
-3. Click **New app**, select this repository/branch, and set the main
-   file path to `app.py`.
-4. Click **Deploy**. You'll get a shareable URL like
-   `https://<app-name>.streamlit.app`.
+### 4. Start the application
 
-### Persistence caveat
+```bash
+streamlit run app.py
 
-Streamlit Community Cloud's filesystem is **not durable storage** — the
-SQLite file can be wiped on redeploys, app restarts, or reboots of the
-underlying container. That's fine for a personal demo, but if you want
-your trade history to survive indefinitely:
+On Windows, you can also run Streamlit directly through the virtual environment:
+.\.venv\Scripts\streamlit.exe run app.py --server.headless true
+```
 
-- Point `TRADING_JOURNAL_DB` (an env var read in `data/db.py`) at a
-  mounted volume if your host supports one, **or**
-- Swap the SQLite connection in `data/db.py` for a hosted database
-  (e.g. Postgres on Supabase/Neon/Railway) using the same function
-  signatures — nothing outside `data/db.py` needs to change.
+The application will open in your browser.
 
-Either way, back up `trading_journal.db` periodically if you're relying
-on the free-tier filesystem.
+## 💾 Data Storage
 
-## Data model
+Trading Journal currently uses **SQLite** for local data storage.
 
-Each trade row: `ticker`, `direction` (Long/Short), `entry_price`,
-`exit_price`, `position_size`, `stop_loss` (optional), `entry_date`,
-`exit_date`, `strategy`, `notes`. A trade is "closed" once it has both
-an exit price and exit date — open trades appear in the journal but are
-excluded from performance analytics until closed.
+The database stores account information and daily journal entries, including P&L, notes, and related data.
+
+The local database file is created automatically when the application starts.
+
+## 🔒 Privacy
+
+Trading Journal is designed to keep your journal data under your control when running locally.
+
+Avoid committing sensitive information such as:
+
+* API keys
+* Passwords
+* Authentication tokens
+* Private credentials
+* Environment variables containing secrets
+
+Add sensitive files to `.gitignore` before pushing the project to GitHub.
+
+## 📌 Project Status
+
+Trading Journal is actively being developed with a focus on creating a simple but powerful journaling experience for traders managing multiple accounts.
+
+Future improvements may include:
+
+* Advanced prop-firm rule tracking
+* More analytics
+* Account comparison
+* Calendar heatmaps
+* Exporting journal data
+* Cloud database support
+* Authentication and user accounts
+
+---
+
+**Trading Journal** — Track the day. Understand the performance. Improve the process.
+v

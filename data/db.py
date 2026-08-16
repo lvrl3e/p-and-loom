@@ -6,6 +6,11 @@ sqlite3 driver; every function returns/accepts plain Python types (dicts,
 pandas DataFrames) rather than leaking sqlite-specific objects, so swapping
 the backend (e.g. to Postgres via SQLAlchemy) later only means rewriting
 this file.
+
+Three tables: an account can have many daily_entries (one per calendar
+date, enforced by a UNIQUE constraint so re-logging a date edits in place),
+and a daily_entry can have many screenshots. This module is pure SQL —
+screenshot file I/O lives in data/storage.py, orchestrated by the views.
 """
 
 import os
@@ -16,33 +21,50 @@ import pandas as pd
 
 DB_PATH = os.environ.get("TRADING_JOURNAL_DB", os.path.join(os.path.dirname(os.path.dirname(__file__)), "trading_journal.db"))
 
-TRADE_COLUMNS = [
-    "ticker",
-    "direction",
-    "entry_price",
-    "exit_price",
-    "position_size",
-    "stop_loss",
-    "entry_date",
-    "exit_date",
-    "strategy",
-    "notes",
+ACCOUNT_COLUMNS = [
+    "name",
+    "firm",
+    "account_size",
+    "starting_balance",
+    "account_type",
+    "color",
+    "profit_target",
+    "max_drawdown_limit",
+    "daily_loss_limit",
+    "status",
 ]
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS trades (
+CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticker TEXT NOT NULL,
-    direction TEXT NOT NULL CHECK (direction IN ('Long', 'Short')),
-    entry_price REAL NOT NULL,
-    exit_price REAL,
-    position_size REAL NOT NULL,
-    stop_loss REAL,
-    entry_date TEXT NOT NULL,
-    exit_date TEXT,
-    strategy TEXT,
-    notes TEXT,
+    name TEXT NOT NULL,
+    firm TEXT,
+    account_size REAL NOT NULL,
+    starting_balance REAL NOT NULL,
+    account_type TEXT,
+    color TEXT NOT NULL DEFAULT '#E85D9E',
+    profit_target REAL,
+    max_drawdown_limit REAL,
+    daily_loss_limit REAL,
+    status TEXT NOT NULL DEFAULT 'Active',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS daily_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    entry_date TEXT NOT NULL,
+    pnl REAL NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(account_id, entry_date)
+);
+
+CREATE TABLE IF NOT EXISTS screenshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    daily_entry_id INTEGER NOT NULL REFERENCES daily_entries(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
 
@@ -60,57 +82,162 @@ def get_connection():
 
 def init_db():
     with get_connection() as conn:
-        conn.execute(SCHEMA)
+        conn.executescript(SCHEMA)
 
 
-def add_trade(trade: dict) -> int:
-    """Insert a trade and return its new id."""
-    fields = [c for c in TRADE_COLUMNS if c in trade]
+# ---------------------------------------------------------------- accounts
+
+def add_account(account: dict) -> int:
+    fields = [c for c in ACCOUNT_COLUMNS if c in account]
     placeholders = ", ".join("?" for _ in fields)
     columns = ", ".join(fields)
-    values = [trade[c] for c in fields]
+    values = [account[c] for c in fields]
 
     with get_connection() as conn:
         cur = conn.execute(
-            f"INSERT INTO trades ({columns}) VALUES ({placeholders})", values
+            f"INSERT INTO accounts ({columns}) VALUES ({placeholders})", values
         )
         return cur.lastrowid
 
 
-def update_trade(trade_id: int, trade: dict) -> None:
-    fields = [c for c in TRADE_COLUMNS if c in trade]
+def update_account(account_id: int, account: dict) -> None:
+    fields = [c for c in ACCOUNT_COLUMNS if c in account]
     assignments = ", ".join(f"{c} = ?" for c in fields)
-    values = [trade[c] for c in fields] + [trade_id]
+    values = [account[c] for c in fields] + [account_id]
 
     with get_connection() as conn:
-        conn.execute(f"UPDATE trades SET {assignments} WHERE id = ?", values)
+        conn.execute(f"UPDATE accounts SET {assignments} WHERE id = ?", values)
 
 
-def delete_trade(trade_id: int) -> None:
+def delete_account(account_id: int) -> None:
+    """Deletes the account and (via ON DELETE CASCADE) its daily_entries and
+    screenshots rows. Callers should fetch screenshot file paths first (see
+    get_all_screenshots) and remove the files themselves before calling this."""
     with get_connection() as conn:
-        conn.execute("DELETE FROM trades WHERE id = ?", (trade_id,))
+        conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
 
 
-def get_all_trades() -> pd.DataFrame:
+def get_all_accounts() -> pd.DataFrame:
     with get_connection() as conn:
-        df = pd.read_sql_query(
-            "SELECT * FROM trades ORDER BY entry_date DESC, id DESC", conn
-        )
-    for col in ("entry_date", "exit_date"):
-        df[col] = pd.to_datetime(df[col], errors="coerce")
-    return df
+        return pd.read_sql_query("SELECT * FROM accounts ORDER BY created_at ASC, id ASC", conn)
 
 
-def get_trade(trade_id: int) -> dict | None:
+def get_account(account_id: int) -> dict | None:
     with get_connection() as conn:
         conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT * FROM trades WHERE id = ?", (trade_id,)).fetchone()
+        row = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
         return dict(row) if row else None
 
 
-def distinct_strategies() -> list[str]:
+# ----------------------------------------------------------- daily entries
+
+def upsert_daily_entry(account_id: int, entry_date: str, pnl: float, notes: str | None) -> int:
+    """Insert a daily entry, or update it in place if this account already
+    has an entry for that date (one entry per account per date)."""
     with get_connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO daily_entries (account_id, entry_date, pnl, notes)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(account_id, entry_date)
+            DO UPDATE SET pnl = excluded.pnl, notes = excluded.notes
+            """,
+            (account_id, entry_date, pnl, notes),
+        )
+        if cur.lastrowid:
+            return cur.lastrowid
+        row = conn.execute(
+            "SELECT id FROM daily_entries WHERE account_id = ? AND entry_date = ?",
+            (account_id, entry_date),
+        ).fetchone()
+        return row[0]
+
+
+def get_daily_entries(account_id: int | None = None) -> pd.DataFrame:
+    """All daily entries, optionally scoped to one account. account_id=None
+    returns every account's entries (used for the "All Accounts" view)."""
+    with get_connection() as conn:
+        if account_id is None:
+            df = pd.read_sql_query(
+                "SELECT * FROM daily_entries ORDER BY entry_date ASC, id ASC", conn
+            )
+        else:
+            df = pd.read_sql_query(
+                "SELECT * FROM daily_entries WHERE account_id = ? ORDER BY entry_date ASC, id ASC",
+                conn, params=(account_id,),
+            )
+    if not df.empty:
+        df["entry_date"] = pd.to_datetime(df["entry_date"], errors="coerce")
+    return df
+
+
+def get_daily_entry(account_id: int, entry_date: str) -> dict | None:
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM daily_entries WHERE account_id = ? AND entry_date = ?",
+            (account_id, entry_date),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def delete_daily_entry(entry_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM daily_entries WHERE id = ?", (entry_id,))
+
+
+# ------------------------------------------------------------- screenshots
+
+def add_screenshot(daily_entry_id: int, file_path: str) -> int:
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO screenshots (daily_entry_id, file_path) VALUES (?, ?)",
+            (daily_entry_id, file_path),
+        )
+        return cur.lastrowid
+
+
+def get_screenshots(daily_entry_id: int) -> list[dict]:
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT DISTINCT strategy FROM trades WHERE strategy IS NOT NULL AND strategy != '' ORDER BY strategy"
+            "SELECT * FROM screenshots WHERE daily_entry_id = ? ORDER BY uploaded_at ASC",
+            (daily_entry_id,),
         ).fetchall()
-        return [r[0] for r in rows]
+        return [dict(r) for r in rows]
+
+
+def delete_screenshot(screenshot_id: int) -> str | None:
+    """Deletes the DB row and returns its file_path so the caller can remove
+    the file from disk (kept out of this module — see data/storage.py)."""
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT file_path FROM screenshots WHERE id = ?", (screenshot_id,)
+        ).fetchone()
+        conn.execute("DELETE FROM screenshots WHERE id = ?", (screenshot_id,))
+        return row["file_path"] if row else None
+
+
+def get_all_screenshots(account_id: int | None = None) -> pd.DataFrame:
+    """Screenshots joined with their daily entry (date, account, notes) —
+    used by the Screenshots gallery page."""
+    query = """
+        SELECT s.id, s.file_path, s.uploaded_at,
+               e.id AS daily_entry_id, e.entry_date, e.pnl, e.notes, e.account_id,
+               a.name AS account_name, a.color AS account_color
+        FROM screenshots s
+        JOIN daily_entries e ON e.id = s.daily_entry_id
+        JOIN accounts a ON a.id = e.account_id
+    """
+    params = ()
+    if account_id is not None:
+        query += " WHERE e.account_id = ?"
+        params = (account_id,)
+    query += " ORDER BY e.entry_date DESC, s.uploaded_at ASC"
+
+    with get_connection() as conn:
+        df = pd.read_sql_query(query, conn, params=params)
+    if not df.empty:
+        df["entry_date"] = pd.to_datetime(df["entry_date"], errors="coerce")
+    return df

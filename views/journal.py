@@ -2,16 +2,19 @@ import streamlit as st
 
 from data.db import init_db, get_all_trades, delete_trade
 from logic.calculations import add_calculated_columns
+from ui import theme
 
-st.set_page_config(page_title="Journal | Trading Journal", page_icon="📒", layout="wide")
 init_db()
 
-st.title("📒 Trade Journal")
+st.markdown(
+    theme.page_header("Trade Journal", "Every trade you've logged, in one table", icon="book"),
+    unsafe_allow_html=True,
+)
 
 trades = get_all_trades()
 
 if trades.empty:
-    st.info("No trades logged yet. Head to **Add Trade** in the sidebar to log your first one.")
+    st.info("No trades logged yet. Use **Add Trade** in the sidebar to log your first one.")
     st.stop()
 
 enriched = add_calculated_columns(trades)
@@ -48,12 +51,28 @@ display_cols = [
     "strategy", "notes",
 ]
 
+
+def _signed_color(v) -> str:
+    if v is None or v != v:
+        return ""
+    color = theme.GOOD if v >= 0 else theme.BAD
+    return f"color: {color}; font-weight: 600;"
+
+
+styled = (
+    filtered[display_cols]
+    .style.map(_signed_color, subset=["pnl_dollar", "pnl_pct", "r_multiple"])
+)
+
 st.dataframe(
-    filtered[display_cols],
+    styled,
     width="stretch",
     hide_index=True,
     column_config={
         "id": st.column_config.NumberColumn("ID", width="small"),
+        "ticker": st.column_config.TextColumn("Ticker"),
+        "direction": st.column_config.TextColumn("Direction"),
+        "status": st.column_config.TextColumn("Status"),
         "entry_date": st.column_config.DateColumn("Entry Date"),
         "exit_date": st.column_config.DateColumn("Exit Date"),
         "entry_price": st.column_config.NumberColumn("Entry $", format="$%.2f"),
@@ -70,7 +89,7 @@ st.dataframe(
 )
 
 st.divider()
-st.subheader("Delete a trade")
+st.markdown("##### Delete a trade")
 
 trade_options = {
     f"#{row.id} — {row.ticker} ({row.direction}, {row.entry_date.date()})": row.id
@@ -96,6 +115,6 @@ if trade_options:
             delete_trade(selected_id)
             del st.session_state["confirm_delete_id"]
             st.rerun()
-        if c2.button("Cancel"):
+        if c2.button("Cancel", type="secondary"):
             del st.session_state["confirm_delete_id"]
             st.rerun()

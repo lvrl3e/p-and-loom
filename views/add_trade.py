@@ -3,11 +3,14 @@ import datetime
 import streamlit as st
 
 from data.db import init_db, add_trade, distinct_strategies
+from ui import theme
 
-st.set_page_config(page_title="Add Trade | Trading Journal", page_icon="➕", layout="wide")
 init_db()
 
-st.title("➕ Add Trade")
+st.markdown(
+    theme.page_header("Add Trade", "Log a new position to the journal", icon="dollar"),
+    unsafe_allow_html=True,
+)
 
 existing_strategies = distinct_strategies()
 NEW_TAG_OPTION = "+ Add new tag..."
@@ -54,6 +57,11 @@ with st.form("add_trade_form", clear_on_submit=True):
     new_strategy = ""
     if strategy_choice == NEW_TAG_OPTION:
         new_strategy = st.text_input("New tag name").strip()
+    elif existing_strategies:
+        st.markdown(
+            "".join(theme.tag(s, outline=True) for s in existing_strategies),
+            unsafe_allow_html=True,
+        )
 
     notes = st.text_area("Notes", placeholder="Optional context: catalyst, mistakes, execution quality...")
 

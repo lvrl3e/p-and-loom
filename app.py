@@ -2,37 +2,54 @@ import streamlit as st
 
 from data.db import init_db, get_all_trades
 from logic.calculations import add_calculated_columns
-from logic.analytics import summary_stats
-from ui.format import fmt_currency, fmt_pct, fmt_ratio
+from logic import analytics
+from ui import theme
+from ui.format import fmt_currency_signed, fmt_pct
 
 st.set_page_config(page_title="Trading Journal", page_icon="📈", layout="wide")
-
+theme.inject_css()
 init_db()
 
-st.title("📈 Trading Journal")
-st.caption("Log trades, auto-calculate performance metrics, and see what's actually working.")
+with st.sidebar:
+    st.markdown(
+        """
+        <div class="tj-brand">
+            <div class="tj-brand-mark">TJ</div>
+            <div>
+                <div class="tj-brand-name">Trading Journal</div>
+                <div class="tj-brand-sub"><span class="tj-pulse-dot"></span>Live · local session</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+overview = st.Page("views/overview.py", title="Dashboard", icon=":material/space_dashboard:", default=True)
+add_trade = st.Page("views/add_trade.py", title="Add Trade", icon=":material/add_circle:")
+journal = st.Page("views/journal.py", title="Trade Journal", icon=":material/receipt_long:")
+analytics_page = st.Page("views/analytics.py", title="Analytics", icon=":material/insights:")
+
+pg = st.navigation([overview, add_trade, journal, analytics_page])
 
 trades = get_all_trades()
+with st.sidebar:
+    if trades.empty:
+        st.markdown(
+            theme.sidebar_panel("Snapshot", [("Trades logged", "0", theme.TEXT_PRIMARY)]),
+            unsafe_allow_html=True,
+        )
+    else:
+        stats = analytics.summary_stats(add_calculated_columns(trades))
+        st.markdown(
+            theme.sidebar_panel(
+                "Snapshot",
+                [
+                    ("Total P&L", fmt_currency_signed(stats["total_pnl"]), theme.pnl_color(stats["total_pnl"])),
+                    ("Win rate", fmt_pct(stats["win_rate"]), theme.ACCENT),
+                    ("Trades logged", str(len(trades)), theme.TEXT_PRIMARY),
+                ],
+            ),
+            unsafe_allow_html=True,
+        )
 
-if trades.empty:
-    st.info("No trades logged yet. Head to **Add Trade** in the sidebar to log your first one.")
-else:
-    enriched = add_calculated_columns(trades)
-    stats = summary_stats(enriched)
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Trades", stats["num_trades"])
-    col2.metric("Total P&L", fmt_currency(stats["total_pnl"]))
-    col3.metric("Win Rate", fmt_pct(stats["win_rate"]))
-    col4.metric("Risk-Reward Ratio", fmt_ratio(stats["risk_reward_ratio"]))
-
-    open_count = int((enriched["status"] == "Open").sum())
-    if open_count:
-        st.caption(f"{open_count} open position(s) not yet included in performance metrics.")
-
-    st.divider()
-    st.markdown(
-        "Use the sidebar to **Add Trade**, browse the full **Journal**, "
-        "or dig into the **Dashboard** for equity curve, win/loss distribution, "
-        "and performance by strategy."
-    )
+pg.run()
