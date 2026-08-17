@@ -43,15 +43,13 @@ for row_df in rows:
                 color = theme.pnl_color(stats["total_pnl"])
 
                 subtitle = coalesce(acct["firm"]) or coalesce(acct["account_type"]) or ""
-                has_credentials = bool(coalesce(acct.get("login_account_number")) or coalesce(acct.get("login_password")))
-                login_badge = '<span class="tj-badge tj-badge-neutral" style="margin-left:6px;">🔑 Saved</span>' if has_credentials else ""
                 card_html = (
                     '<div class="tj-acct-top">'
                     f'<div class="tj-acct-dot" style="background:{acct["color"]};"></div>'
                     f'<div><div class="tj-acct-name">{theme.esc(acct["name"])}</div>'
                     f'<div class="tj-acct-firm">{theme.esc(subtitle)}</div></div></div>'
                     f'<div class="tj-acct-balance">${stats["current_balance"]:,.2f}</div>'
-                    f'{theme.status_badge(acct["status"])}{login_badge}'
+                    f'{theme.status_badge(acct["status"])}'
                     '<div class="tj-acct-row"><div class="tj-acct-row-label">Account Size</div>'
                     f'<div class="tj-acct-row-value">${acct["account_size"]:,.0f}</div></div>'
                     '<div class="tj-acct-row"><div class="tj-acct-row-label">Total P&L</div>'
