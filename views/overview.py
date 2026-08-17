@@ -2,6 +2,7 @@ import datetime as dt
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from data.db import get_all_accounts, get_daily_entries
 from logic import analytics
@@ -40,7 +41,7 @@ with sel_col:
 with btn_col:
     account_id = get_selected_id()
     add_disabled = account_id == ALL_ACCOUNTS
-    if st.button("＋ Add Entry", type="primary", width="stretch", disabled=add_disabled):
+    if st.button("＋ Add Trade", type="primary", width="stretch", disabled=add_disabled):
         row = accounts_df[accounts_df["id"] == account_id].iloc[0].to_dict()
         daily_entry_dialog(row, dt.date.today())
 
@@ -69,7 +70,7 @@ with st.container(key="stat-row"):
         ),
         theme.stat_card(
             "Best Day", best_day_value, icon="trending-up", accent=theme.GOOD,
-            sub=best_day["entry_date"].strftime("%b %d, %Y") if best_day is not None else "No entries yet",
+            sub=best_day["entry_date"].strftime("%b %d, %Y") if best_day is not None else "No profitable days yet",
         ),
     ]
     st.markdown(theme.stat_grid(cards), unsafe_allow_html=True)
@@ -124,6 +125,31 @@ with col_progress:
                 st.caption(f"${progress['distance_to_drawdown']:,.0f} of room left")
             else:
                 st.caption("No drawdown limit set for this account.")
+
+            st.write("")
+            if progress["daily_loss_pct"]:
+                st.markdown(
+                    f'<div class="tj-stat-sub" style="margin-bottom:6px;">Daily Drawdown '
+                    f'({progress["daily_loss_pct"]:.1f}% of day start) — '
+                    f'${progress["daily_loss_used"]:,.2f} / ${progress["daily_loss_limit"]:,.2f}</div>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown(theme.progress_bar(progress["daily_loss_used_pct"], theme.BAD), unsafe_allow_html=True)
+                st.caption(
+                    f"Remaining: \\${progress['distance_to_daily_loss']:,.2f} · "
+                    f"Max: \\${progress['daily_loss_limit']:,.2f}"
+                )
+                reset_h, reset_m = (int(x) for x in progress["daily_reset_time"].split(":"))
+                now = dt.datetime.now()
+                next_reset = now.replace(hour=reset_h, minute=reset_m, second=0, microsecond=0)
+                if next_reset <= now:
+                    next_reset += dt.timedelta(days=1)
+                components.html(
+                    theme.countdown_html(next_reset.strftime("%Y-%m-%dT%H:%M:%S"), "Timer Reset In"),
+                    height=22,
+                )
+            else:
+                st.caption("No daily drawdown limit set for this account.")
 
 st.write("")
 

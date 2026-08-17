@@ -182,9 +182,23 @@ def account_dialog(account: dict | None = None):
             help="Trailing: the limit follows your highest balance reached (most prop firms). "
                  "Static: the limit stays fixed at your starting balance and never moves up.",
         )
-        daily_loss_limit = st.number_input(
-            "Daily Loss Limit ($)", min_value=0.0, step=100.0,
-            value=float(db.coalesce(account.get("daily_loss_limit"), 0)) if is_edit else 0.0,
+        daily_loss_pct = st.number_input(
+            "Daily Loss Limit (%)", min_value=0.0, max_value=100.0, step=0.5,
+            value=float(db.coalesce(account.get("daily_loss_pct"), 0)) if is_edit else 0.0,
+            help="Max daily loss as a percent of the balance at the start of each trading day — "
+                 "recalculated daily, the way most prop firms define it.",
+        )
+        default_reset = dt.time(0, 0)
+        raw_reset = db.coalesce(account.get("daily_reset_time")) if is_edit else None
+        if raw_reset:
+            hh, _, mm = raw_reset.partition(":")
+            try:
+                default_reset = dt.time(int(hh), int(mm or 0))
+            except ValueError:
+                pass
+        daily_reset_time = st.time_input(
+            "Daily Reset Time", value=default_reset,
+            help="When the trading day rolls over for the daily loss limit (e.g. broker server time).",
         )
 
     col_a, col_b = st.columns(2)
@@ -203,7 +217,8 @@ def account_dialog(account: dict | None = None):
                 profit_target=profit_target or None,
                 max_drawdown_limit=max_drawdown_limit or None,
                 drawdown_type=drawdown_type_label.lower(),
-                daily_loss_limit=daily_loss_limit or None,
+                daily_loss_pct=daily_loss_pct or None,
+                daily_reset_time=daily_reset_time.strftime("%H:%M"),
             )
             if is_edit:
                 db.update_account(account["id"], data)

@@ -1159,3 +1159,35 @@ def progress_bar(pct: float | None, color: str = ACCENT) -> str:
         '<div class="tj-progress-track">'
         f'<div class="tj-progress-fill" style="width:{pct:.1f}%; background:{color};"></div></div>'
     )
+
+
+def countdown_html(target_iso: str, label: str = "Resets in") -> str:
+    """Self-contained HTML/CSS/JS for a live, second-by-second countdown to
+    `target_iso` (a naive "YYYY-MM-DDTHH:MM:SS" local datetime string).
+
+    Meant for st.components.v1.html, not st.markdown — Streamlit strips
+    <script> tags from markdown's unsafe_allow_html, so a ticking clock
+    needs the iframe components.v1.html gives it instead."""
+    return f"""
+    <style>html, body {{ margin:0; padding:0; background:transparent; }}</style>
+    <div id="tj-countdown" style="
+        font-family:'Inter',sans-serif; font-size:0.8rem; color:{TEXT_SECONDARY};
+        background:transparent;
+    ">{esc(label)}: --:--:--</div>
+    <script>
+    (function() {{
+        var target = new Date("{target_iso}").getTime();
+        var el = document.getElementById("tj-countdown");
+        function tick() {{
+            var diff = Math.max(0, target - Date.now());
+            var h = Math.floor(diff / 3600000);
+            var m = Math.floor((diff % 3600000) / 60000);
+            var s = Math.floor((diff % 60000) / 1000);
+            var pad = function(n) {{ return String(n).padStart(2, "0"); }};
+            el.textContent = "{esc(label)}: " + pad(h) + ":" + pad(m) + ":" + pad(s);
+        }}
+        tick();
+        setInterval(tick, 1000);
+    }})();
+    </script>
+    """

@@ -35,7 +35,8 @@ ACCOUNT_COLUMNS = [
     "profit_target",
     "max_drawdown_limit",
     "drawdown_type",
-    "daily_loss_limit",
+    "daily_loss_pct",
+    "daily_reset_time",
     "status",
     "login_account_number",
     "login_password",
@@ -43,8 +44,16 @@ ACCOUNT_COLUMNS = [
 
 # Added after the original accounts table shipped — new installs get them via
 # SCHEMA below, existing databases get them bolted on here since SQLite has
-# no "ADD COLUMN IF NOT EXISTS" (see _migrate_accounts_columns()).
-_ACCOUNT_MIGRATION_COLUMNS = ["login_account_number", "login_password", "drawdown_type"]
+# no "ADD COLUMN IF NOT EXISTS" (see _migrate_accounts_columns()). Maps
+# column name to the type/constraints clause used in its ALTER TABLE, since
+# SQLite gives a TEXT-affinity column to anything added without one.
+_ACCOUNT_MIGRATION_COLUMNS = {
+    "login_account_number": "TEXT",
+    "login_password": "TEXT",
+    "drawdown_type": "TEXT NOT NULL DEFAULT 'trailing'",
+    "daily_loss_pct": "REAL",
+    "daily_reset_time": "TEXT NOT NULL DEFAULT '00:00'",
+}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -58,7 +67,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     profit_target REAL,
     max_drawdown_limit REAL,
     drawdown_type TEXT NOT NULL DEFAULT 'trailing',
-    daily_loss_limit REAL,
+    daily_loss_pct REAL,
+    daily_reset_time TEXT NOT NULL DEFAULT '00:00',
     status TEXT NOT NULL DEFAULT 'Active',
     login_account_number TEXT,
     login_password TEXT,
@@ -140,15 +150,36 @@ def get_connection():
 
 def _migrate_accounts_columns(conn: sqlite3.Connection) -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
-    for column in _ACCOUNT_MIGRATION_COLUMNS:
+    for column, type_clause in _ACCOUNT_MIGRATION_COLUMNS.items():
         if column not in existing:
-            conn.execute(f"ALTER TABLE accounts ADD COLUMN {column} TEXT")
+            conn.execute(f"ALTER TABLE accounts ADD COLUMN {column} {type_clause}")
+
+
+def _backfill_daily_loss_pct(conn: sqlite3.Connection) -> None:
+    """One-time carry-over for databases from before daily_loss_limit (a
+    flat $ amount) was replaced by daily_loss_pct (recalculated daily off
+    the day's starting balance). Only fills accounts that still have their
+    old $ value and haven't been given a % yet, so it never clobbers a
+    value the user has since set via the Account dialog."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
+    if "daily_loss_limit" not in existing:
+        return
+    conn.execute(
+        """
+        UPDATE accounts
+        SET daily_loss_pct = ROUND(daily_loss_limit * 100.0 / starting_balance, 2)
+        WHERE daily_loss_pct IS NULL
+          AND daily_loss_limit IS NOT NULL
+          AND starting_balance > 0
+        """
+    )
 
 
 def init_db():
     with get_connection() as conn:
         conn.executescript(SCHEMA)
         _migrate_accounts_columns(conn)
+        _backfill_daily_loss_pct(conn)
 
 
 # ---------------------------------------------------------------- accounts

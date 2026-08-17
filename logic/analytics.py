@@ -8,6 +8,8 @@ direct daily input, so "analytics" is entirely about aggregating and
 sequencing that one number over time.
 """
 
+import datetime as dt
+
 import numpy as np
 import pandas as pd
 
@@ -141,7 +143,7 @@ def summary_stats(df: pd.DataFrame, starting_balance: float) -> dict:
         "win_rate": (len(wins) / decided * 100) if decided else None,
         "avg_daily_profit": wins["pnl"].mean() if len(wins) else 0.0,
         "avg_daily_loss": losses["pnl"].mean() if len(losses) else 0.0,
-        "best_day": df.loc[df["pnl"].idxmax()] if n else None,
+        "best_day": df.loc[wins["pnl"].idxmax()] if len(wins) else None,
         "worst_day": df.loc[df["pnl"].idxmin()] if n else None,
         "streak": current_streak(df),
         "max_drawdown": max_drawdown(equity),
@@ -181,8 +183,47 @@ def prop_firm_progress(stats: dict, account: dict, equity_df: pd.DataFrame) -> d
     else:
         dd_limit = None
 
-    daily_loss_limit = account.get("daily_loss_limit")
-    daily_loss_limit = daily_loss_limit if pd.notna(daily_loss_limit) else None
+    daily_loss_pct = account.get("daily_loss_pct")
+    daily_loss_limit = None
+    daily_loss_used = None
+    distance_to_daily_loss = None
+    daily_loss_used_pct = None
+    if pd.notna(daily_loss_pct):
+        today_pnl = 0.0
+        today_rows = equity_df[equity_df["entry_date"] == pd.Timestamp(dt.date.today())] if not equity_df.empty else equity_df
+        if not today_rows.empty:
+            today_pnl = float(today_rows["pnl"].iloc[-1])
+
+        if drawdown_type == "static":
+            # Fixed at the account's starting balance, same as the overall
+            # static drawdown above — the limit never moves day to day.
+            day_start_balance = stats["starting_balance"]
+        elif not today_rows.empty:
+            day_start_balance = float(today_rows["balance"].iloc[-1]) - today_pnl
+        elif not equity_df.empty:
+            day_start_balance = float(equity_df["balance"].iloc[-1])
+        else:
+            day_start_balance = stats["starting_balance"]
+
+        daily_loss_limit = day_start_balance * daily_loss_pct / 100
+        daily_loss_used = max(0.0, -today_pnl)
+        distance_to_daily_loss = max(0.0, daily_loss_limit - daily_loss_used)
+
+        # A day can end early for either reason — the daily-loss % or the
+        # overall drawdown limit — so however much room the account has left
+        # today is really whichever cap is tighter. Without this, a nearly
+        # maxed-out overall drawdown (e.g. $28 left of an $800 limit) would
+        # still show a full daily allowance the trader can't actually use.
+        if distance_to_drawdown is not None and distance_to_drawdown < distance_to_daily_loss:
+            distance_to_daily_loss = distance_to_drawdown
+            daily_loss_limit = daily_loss_used + distance_to_daily_loss
+
+        daily_loss_used_pct = max(0.0, min(100.0, daily_loss_used / daily_loss_limit * 100)) if daily_loss_limit else 0.0
+    else:
+        daily_loss_pct = None
+
+    raw_reset_time = account.get("daily_reset_time")
+    daily_reset_time = raw_reset_time if isinstance(raw_reset_time, str) and raw_reset_time else "00:00"
 
     return {
         "profit_target": target,
@@ -193,7 +234,12 @@ def prop_firm_progress(stats: dict, account: dict, equity_df: pd.DataFrame) -> d
         "current_drawdown": drawdown_used,
         "distance_to_drawdown": distance_to_drawdown,
         "drawdown_used_pct": drawdown_used_pct,
+        "daily_loss_pct": daily_loss_pct,
         "daily_loss_limit": daily_loss_limit,
+        "daily_loss_used": daily_loss_used,
+        "distance_to_daily_loss": distance_to_daily_loss,
+        "daily_loss_used_pct": daily_loss_used_pct,
+        "daily_reset_time": daily_reset_time,
     }
 
 
