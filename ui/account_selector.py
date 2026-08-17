@@ -69,7 +69,7 @@ def selected_account_and_entries(accounts_df: pd.DataFrame, get_daily_entries):
     selected = st.session_state[SESSION_KEY]
 
     if selected is None:
-        return None, 0.0, pd.DataFrame(columns=["id", "account_id", "entry_date", "pnl", "notes"])
+        return None, 0.0, pd.DataFrame(columns=["id", "account_id", "entry_date", "pnl", "notes", "trade_count"])
 
     if selected == ALL_ACCOUNTS:
         starting_balance = float(accounts_df["starting_balance"].sum())

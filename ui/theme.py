@@ -5,26 +5,232 @@ account cards, calendar cells) used across views for a consistent,
 hand-styled look on top of Streamlit's defaults.
 """
 
+import base64
+import colorsys
 import html
+import os
 
 import streamlit as st
 
-BG = "#0D0D0F"
-CARD_BG = "#17171A"
-BORDER = "rgba(255, 255, 255, 0.08)"
-TEXT_PRIMARY = "#F5F5F5"
-TEXT_SECONDARY = "#A1A1AA"
-ACCENT_SOFT = "#F4A6C1"
-ACCENT = "#E85D9E"
-ACCENT_HOVER = "#F070AC"
-ACCENT_LIGHT = "#FFD6E5"
-GOOD = "#22C55E"
-BAD = "#EF4444"
-NEUTRAL = "#A1A1AA"
+from data.db import delete_setting, get_setting, set_setting
 
-GOOD_BG = "rgba(34, 197, 94, 0.12)"
-BAD_BG = "rgba(239, 68, 68, 0.12)"
-NEUTRAL_BG = "rgba(161, 161, 170, 0.12)"
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
+_LOGO_ICON_PATH = os.path.join(_PROJECT_ROOT, "docs", "logo-icon.png")
+
+
+@st.cache_data
+def logo_icon_data_uri() -> str:
+    """Base64 data URI for the P&Loom icon mark — raw <img> tags in
+    st.markdown(unsafe_allow_html=True) can't reference local file paths
+    (Streamlit doesn't serve arbitrary project files over HTTP), so the
+    image bytes are inlined instead. Cached so the file is only read once
+    per server process, not on every rerun."""
+    with open(_LOGO_ICON_PATH, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+# Two full palettes, swapped per-request by apply_theme() based on the
+# viewer's actual active theme (st.context.theme.type — reflects OS/browser
+# "prefers-color-scheme" when the user hasn't overridden it, and Streamlit's
+# own theme picker when they have). Module-level names below default to the
+# dark set; apply_theme() overwrites them in place before anything else in
+# a run reads them, and every function in this file reads the bare names
+# (not a frozen import), so a single call at the top of app.py keeps
+# everything — CSS, HTML components, chart colors — in sync.
+_DARK = dict(
+    BG="#0D0D0F",
+    CARD_BG="#17171A",
+    BORDER="rgba(255, 255, 255, 0.08)",
+    TEXT_PRIMARY="#F5F5F5",
+    TEXT_SECONDARY="#A1A1AA",
+    ACCENT_SOFT="#F4A6C1",
+    ACCENT="#E85D9E",
+    ACCENT_HOVER="#F070AC",
+    ACCENT_LIGHT="#FFD6E5",
+    ON_ACCENT="#0D0D0F",
+    GOOD="#22C55E",
+    BAD="#EF4444",
+    NEUTRAL="#A1A1AA",
+    GOOD_BG="rgba(34, 197, 94, 0.12)",
+    BAD_BG="rgba(239, 68, 68, 0.12)",
+    NEUTRAL_BG="rgba(161, 161, 170, 0.12)",
+)
+
+_LIGHT = dict(
+    BG="#FAFAFA",
+    CARD_BG="#FFFFFF",
+    BORDER="rgba(0, 0, 0, 0.08)",
+    TEXT_PRIMARY="#111114",
+    TEXT_SECONDARY="#6B6B76",
+    ACCENT_SOFT="#D6478C",
+    ACCENT="#D6478C",
+    ACCENT_HOVER="#B93C74",
+    ACCENT_LIGHT="#FFE3ED",
+    ON_ACCENT="#0D0D0F",
+    GOOD="#16A34A",
+    BAD="#DC2626",
+    NEUTRAL="#71717A",
+    GOOD_BG="rgba(22, 163, 74, 0.10)",
+    BAD_BG="rgba(220, 38, 38, 0.10)",
+    NEUTRAL_BG="rgba(113, 113, 122, 0.10)",
+)
+
+# Safe defaults (dark) until apply_theme() runs.
+BG = _DARK["BG"]
+CARD_BG = _DARK["CARD_BG"]
+BORDER = _DARK["BORDER"]
+TEXT_PRIMARY = _DARK["TEXT_PRIMARY"]
+TEXT_SECONDARY = _DARK["TEXT_SECONDARY"]
+ACCENT_SOFT = _DARK["ACCENT_SOFT"]
+ACCENT = _DARK["ACCENT"]
+ACCENT_HOVER = _DARK["ACCENT_HOVER"]
+ACCENT_LIGHT = _DARK["ACCENT_LIGHT"]
+ON_ACCENT = _DARK["ON_ACCENT"]
+GOOD = _DARK["GOOD"]
+BAD = _DARK["BAD"]
+NEUTRAL = _DARK["NEUTRAL"]
+GOOD_BG = _DARK["GOOD_BG"]
+BAD_BG = _DARK["BAD_BG"]
+NEUTRAL_BG = _DARK["NEUTRAL_BG"]
+
+CURRENT_MODE = "dark"
+
+DEFAULT_ACCENT = _DARK["ACCENT"]
+
+# Curated presets shown as swatches in Settings, spanning distinct hues so
+# the pink brand color isn't the only easy pick.
+ACCENT_PRESETS = ["#E85D9E", "#2A78D6", "#1BAF7A", "#EDA100", "#4A3AA7", "#E8555D", "#17B8B0"]
+
+_SESSION_KEY = "_theme_mode"
+_ACCENT_SETTING_KEY = "accent_color"
+_MODE_SETTING_KEY = "theme_mode_override"
+
+
+def _hex_to_rgb01(hex_color: str) -> tuple:
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+def _rgb01_to_hex(rgb: tuple) -> str:
+    return "#" + "".join(f"{max(0, min(255, round(c * 255))):02X}" for c in rgb)
+
+
+def hex_to_rgba(hex_color: str, alpha: float) -> str:
+    """rgba(...) string for a hex color — used to derive translucent tints
+    (hover backgrounds, icon chips, card borders) from whatever the active
+    ACCENT is, instead of hardcoding the brand pink's rgb triplet."""
+    r, g, b = (round(c * 255) for c in _hex_to_rgb01(hex_color))
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def accent_rgba(alpha: float) -> str:
+    return hex_to_rgba(ACCENT, alpha)
+
+
+def _adjust_lightness(hex_color: str, delta: float) -> str:
+    h, l, s = colorsys.rgb_to_hls(*_hex_to_rgb01(hex_color))
+    l = max(0.0, min(1.0, l + delta))
+    return _rgb01_to_hex(colorsys.hls_to_rgb(h, l, s))
+
+
+def _contrast_text(hex_color: str) -> str:
+    r, g, b = _hex_to_rgb01(hex_color)
+    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return "#0D0D0F" if luminance > 0.55 else "#F5F5F5"
+
+
+def _derive_accent_tokens(base_hex: str, mode: str) -> dict:
+    """Derives hover/soft/light/on-accent variants from a single base
+    color, mirroring the relationship the hand-picked dark/light palettes
+    above already have between their own ACCENT and ACCENT_HOVER/
+    ACCENT_SOFT/ACCENT_LIGHT — so a user-picked accent slots in without
+    needing its own picker for every derived token."""
+    if mode == "dark":
+        hover = _adjust_lightness(base_hex, 0.08)
+        soft = _adjust_lightness(base_hex, 0.22)
+    else:
+        hover = _adjust_lightness(base_hex, -0.10)
+        soft = base_hex
+    return dict(
+        ACCENT=base_hex,
+        ACCENT_HOVER=hover,
+        ACCENT_SOFT=soft,
+        ACCENT_LIGHT=_adjust_lightness(base_hex, 0.38),
+        ON_ACCENT=_contrast_text(base_hex),
+    )
+
+
+def get_custom_accent() -> str | None:
+    return get_setting(_ACCENT_SETTING_KEY)
+
+
+def set_custom_accent(hex_color: str | None) -> None:
+    """Pass None (or the default accent) to reset to the built-in palette."""
+    if hex_color and hex_color.upper() != DEFAULT_ACCENT.upper():
+        set_setting(_ACCENT_SETTING_KEY, hex_color)
+    else:
+        delete_setting(_ACCENT_SETTING_KEY)
+
+
+def get_mode_override() -> str | None:
+    """Manual light/dark override, saved in Settings — takes priority over
+    auto-detection. Returns None for "Auto" (follow the viewer's browser)."""
+    value = get_setting(_MODE_SETTING_KEY)
+    return value if value in ("light", "dark") else None
+
+
+def set_mode_override(mode: str | None) -> None:
+    """Pass "light"/"dark" to force a mode, or None to go back to
+    auto-detecting from the browser's prefers-color-scheme."""
+    if mode in ("light", "dark"):
+        set_setting(_MODE_SETTING_KEY, mode)
+    else:
+        delete_setting(_MODE_SETTING_KEY)
+    # Drop the cached auto-detected reading so a switch back to "Auto"
+    # re-detects fresh instead of replaying a stale value from earlier in
+    # this session (see apply_theme()'s docstring for why that's cached).
+    st.session_state.pop(_SESSION_KEY, None)
+
+
+def apply_theme() -> str:
+    """Detects the viewer's active theme and updates every color name in
+    this module to match. Call once, at the very top of app.py, before
+    inject_css() or anything else that reads a color. Returns "dark" or
+    "light" (also stored as CURRENT_MODE) in case a caller needs to branch
+    on it directly (e.g. Plotly template choice).
+
+    A manual override saved via Settings (get_mode_override()) always wins.
+    Otherwise, st.context.theme.type only reflects the browser's real
+    prefers-color-scheme on a session's very first script run — confirmed
+    empirically, not a guess: on every later rerun (which includes every
+    st.navigation page switch, since those go over the same WebSocket
+    rather than reloading the page) it silently reports a different,
+    wrong value. So the first good reading is cached in session_state and
+    reused for the rest of the session instead of re-trusting it each run.
+    """
+    global CURRENT_MODE
+    override = get_mode_override()
+    if override:
+        mode = override
+    else:
+        cached = st.session_state.get(_SESSION_KEY)
+        if cached in ("light", "dark"):
+            mode = cached
+        else:
+            try:
+                theme_type = st.context.theme.type
+            except Exception:
+                theme_type = None
+            mode = theme_type if theme_type in ("light", "dark") else "dark"
+            st.session_state[_SESSION_KEY] = mode
+    globals().update(_LIGHT if mode == "light" else _DARK)
+
+    custom_accent = get_custom_accent()
+    if custom_accent:
+        globals().update(_derive_accent_tokens(custom_accent, mode))
+
+    CURRENT_MODE = mode
+    return mode
 
 # Curated palette for account color-coding — small, harmonious, colorblind-
 # distinct set (borrowed from the categorical hues used elsewhere), pink
@@ -55,6 +261,10 @@ _ICON_PATHS = {
     "flame": '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path>',
     "flag": '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line>',
     "shield": '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>',
+    "wave": '<path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"></path><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path>',
+    "heart": '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>',
+    "settings": '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>',
+    "moon": '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>',
 }
 
 
@@ -126,7 +336,7 @@ def inject_css() -> None:
             border-bottom: 1px solid {BORDER};
         }}
         [data-testid="stMainBlockContainer"] {{
-            padding-top: 2.75rem;
+            padding-top: 4.5rem;
         }}
 
         /* Sidebar */
@@ -143,7 +353,7 @@ def inject_css() -> None:
             transition: background-color 0.15s ease;
         }}
         [data-testid="stSidebarNavLink"]:hover {{
-            background-color: rgba(232, 93, 158, 0.10);
+            background-color: {accent_rgba(0.10)};
         }}
         [data-testid="stSidebarNavLink"] span {{
             color: {TEXT_SECONDARY} !important;
@@ -156,11 +366,11 @@ def inject_css() -> None:
             background-color: {ACCENT};
         }}
         [data-testid="stSidebarNavLink"][aria-current="page"] span {{
-            color: {BG} !important;
+            color: {ON_ACCENT} !important;
             font-weight: 700;
         }}
         [data-testid="stSidebarNavLink"][aria-current="page"] svg {{
-            fill: {BG} !important;
+            fill: {ON_ACCENT} !important;
         }}
 
         .tj-brand {{
@@ -170,17 +380,11 @@ def inject_css() -> None:
             padding: 4px 12px 16px 12px;
             border-bottom: 1px solid {BORDER};
         }}
-        .tj-brand-mark {{
-            width: 32px;
-            height: 32px;
+        .tj-brand-mark-img {{
+            width: 34px;
+            height: 34px;
             border-radius: 9px;
-            background: {ACCENT};
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 800;
-            color: {BG};
-            font-size: 0.95rem;
+            object-fit: cover;
             flex-shrink: 0;
         }}
         .tj-brand-name {{
@@ -261,18 +465,20 @@ def inject_css() -> None:
         /* Buttons */
         .stButton > button, .stFormSubmitButton > button {{
             background-color: {ACCENT};
-            color: {BG};
+            color: {ON_ACCENT};
             border: none;
             border-radius: 10px;
             font-weight: 600;
             padding: 0.5rem 1.25rem;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
             transition: background-color 0.15s ease;
         }}
         .stButton > button:hover, .stFormSubmitButton > button:hover,
         .stButton > button:focus:not(:active), .stFormSubmitButton > button:focus:not(:active) {{
             background-color: {ACCENT_HOVER};
-            color: {BG};
+            color: {ON_ACCENT};
         }}
         .stButton > button[kind="secondary"] {{
             background-color: transparent;
@@ -288,9 +494,84 @@ def inject_css() -> None:
             border-radius: 10px;
         }}
 
+        /* Native widgets (segmented_control, tabs) bake Streamlit's config.toml
+           primaryColor into their selected-state styling at render time, so a
+           custom accent needs an explicit override here to actually reach them. */
+        button[data-variant="segmented_control"][aria-checked="true"] {{
+            color: {ACCENT} !important;
+            background-color: {accent_rgba(0.1)} !important;
+            border-color: {ACCENT} !important;
+        }}
+        .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {{
+            color: {ACCENT} !important;
+        }}
+        .stTabs [data-baseweb="tab-highlight"] {{
+            background-color: {ACCENT} !important;
+        }}
+
+        /* Text/number inputs, textareas, and selectboxes render with
+           Streamlit's hardcoded light-theme chrome (a white box, dark text)
+           regardless of our palette, since no [theme] base is set in
+           config.toml — overridden here so every input surface matches
+           CARD_BG/TEXT_PRIMARY in both light and dark mode. */
+        [data-testid="stTextInput"] .react-aria-TextField,
+        [data-testid="stTextInput"] .react-aria-TextField > div,
+        [data-testid="stTextArea"] .react-aria-TextField,
+        [data-testid="stTextArea"] .react-aria-TextField > div,
+        [data-testid="stNumberInputContainer"],
+        [data-testid="stSelectbox"] [role="group"] {{
+            background-color: {CARD_BG} !important;
+            border-color: {BORDER} !important;
+            color: {TEXT_PRIMARY} !important;
+        }}
+        [data-testid="stTextInput"] input,
+        [data-testid="stTextArea"] textarea,
+        [data-testid="stNumberInputField"],
+        [data-testid="stSelectbox"] input {{
+            color: {TEXT_PRIMARY} !important;
+        }}
+        [data-testid="stTextInput"] input::placeholder,
+        [data-testid="stTextArea"] textarea::placeholder,
+        [data-testid="stSelectbox"] input::placeholder {{
+            color: {TEXT_SECONDARY} !important;
+            opacity: 1;
+        }}
+        [data-testid="stSelectboxVirtualDropdown"] {{
+            background-color: {CARD_BG} !important;
+            border: 1px solid {BORDER} !important;
+        }}
+        [role="option"] {{
+            color: {TEXT_PRIMARY} !important;
+        }}
+        [role="option"]:hover, [role="option"][aria-selected="true"] {{
+            background-color: {accent_rgba(0.12)} !important;
+        }}
+
         /* Cards (via st.container(key=...)) — fixed, known-in-advance keys */
         {" ".join(f'.st-key-{key} {{ background-color: {CARD_BG}; border: 1px solid {BORDER}; border-radius: 16px; padding: 22px 24px; margin-bottom: 4px; transition: border-color 0.15s ease; }}' for key in CARD_KEYS)}
-        {" ".join(f'.st-key-{key}:hover {{ border-color: rgba(232, 93, 158, 0.35); }}' for key in CARD_KEYS)}
+        {" ".join(f'.st-key-{key}:hover {{ border-color: {accent_rgba(0.35)}; }}' for key in CARD_KEYS)}
+
+        /* Accent-color swatch buttons on the Settings page — one rule per
+           preset hex, keyed by st.button(key=f"preset-{{hex}}"). */
+        {" ".join(
+            f'.st-key-preset-{p.lstrip("#")} button {{ background-color: {p} !important; '
+            f'border-radius: 8px !important; height: 34px !important; min-height: 34px !important; '
+            f'padding: 0 !important; border: 2px solid '
+            f'{ACCENT if p.upper() == ACCENT.upper() else "transparent"} !important; '
+            f'box-shadow: 0 0 0 1px {BORDER} !important; }}'
+            for p in ACCENT_PRESETS
+        )}
+
+        /* Icon-only buttons (e.g. the account-card credentials key button)
+           — the default text-button padding leaves an icon off-center and
+           the button taller/narrower than its row siblings, so this trims
+           padding to 0 and lets the icon center itself. */
+        [class*="st-key-cred-"] button {{
+            padding: 0 !important;
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+        }}
 
         /* Cards with dynamic, data-driven keys (account id, screenshot id, ...) —
            matched by prefix since the exact key set isn't known up front. */
@@ -299,10 +580,12 @@ def inject_css() -> None:
             border: 1px solid {BORDER};
             border-radius: 16px;
             padding: 20px 22px;
+            min-height: 230px;
+            box-sizing: border-box;
             transition: border-color 0.15s ease, transform 0.15s ease;
         }}
         [class*="st-key-acct-"]:hover {{
-            border-color: rgba(232, 93, 158, 0.35);
+            border-color: {accent_rgba(0.35)};
             transform: translateY(-2px);
         }}
         [class*="st-key-shot-"] {{
@@ -313,12 +596,27 @@ def inject_css() -> None:
             transition: border-color 0.15s ease;
         }}
         [class*="st-key-shot-"]:hover {{
-            border-color: rgba(232, 93, 158, 0.35);
+            border-color: {accent_rgba(0.35)};
+        }}
+        [class*="st-key-calday-"] {{
+            border-radius: 10px;
+            padding: 3px;
+            box-sizing: border-box;
         }}
         [class*="st-key-calday-"] button {{
             width: 100%;
-            border-radius: 10px !important;
-            font-weight: 700 !important;
+            border-radius: 8px !important;
+            background-color: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 7px 0 !important;
+            white-space: pre-line !important;
+            line-height: 1.6 !important;
+        }}
+        [class*="st-key-calday-"] button p {{
+            font-size: 0.72rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
         }}
 
         .tj-page-header {{
@@ -331,7 +629,7 @@ def inject_css() -> None:
             width: 42px;
             height: 42px;
             border-radius: 12px;
-            background: rgba(232, 93, 158, 0.12);
+            background: {accent_rgba(0.12)};
             color: {ACCENT};
             display: flex;
             align-items: center;
@@ -363,7 +661,7 @@ def inject_css() -> None:
             width: 26px;
             height: 26px;
             border-radius: 8px;
-            background: rgba(232, 93, 158, 0.12);
+            background: {accent_rgba(0.12)};
             color: {ACCENT};
             display: flex;
             align-items: center;
@@ -466,6 +764,10 @@ def inject_css() -> None:
             border-left: 3px solid {TEXT_SECONDARY};
             border-radius: 12px;
             padding: 16px 18px;
+            min-height: 118px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
             transition: transform 0.15s ease, border-color 0.15s ease;
         }}
         .tj-stat:hover {{
@@ -529,7 +831,7 @@ def inject_css() -> None:
             display: inline-block;
             background: transparent;
             color: {ACCENT_SOFT};
-            border: 1px solid rgba(244, 166, 193, 0.35);
+            border: 1px solid {hex_to_rgba(ACCENT_SOFT, 0.35)};
             font-size: 0.72rem;
             font-weight: 600;
             padding: 2px 10px;
@@ -547,7 +849,7 @@ def inject_css() -> None:
         .tj-badge-good {{ color: {GOOD}; background: {GOOD_BG}; }}
         .tj-badge-bad {{ color: {BAD}; background: {BAD_BG}; }}
         .tj-badge-neutral {{ color: {TEXT_SECONDARY}; background: {NEUTRAL_BG}; }}
-        .tj-badge-accent {{ color: {ACCENT}; background: rgba(232, 93, 158, 0.12); }}
+        .tj-badge-accent {{ color: {ACCENT}; background: {accent_rgba(0.12)}; }}
 
         .tj-progress-track {{
             width: 100%;
@@ -682,29 +984,28 @@ def inject_css() -> None:
             height: 8px;
             border-radius: 3px;
         }}
-        .tj-cal-pnl {{
-            text-align: center;
-            font-size: 0.66rem;
-            font-weight: 700;
-            margin-top: 2px;
-            font-variant-numeric: tabular-nums;
-        }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-def calendar_cell_css(cells: list) -> str:
+def calendar_cell_css(cells: list, week_total_keys: frozenset = frozenset()) -> str:
     """One small CSS rule per calendar day (~28-42 per month) so each button
     can be colored by that day's outcome without per-instance inline style,
     which Streamlit's rendered wrapper divs don't accept. Injected once per
     calendar render, right before the grid — same technique CARD_KEYS uses
-    for the fixed containers, just data-driven instead of static."""
+    for the fixed containers, just data-driven instead of static.
+
+    week_total_keys are Saturday cells repurposed to show that week's P&L
+    sum (see calendar_widget.render_month) — styled as a distinct
+    accent-tinted summary slot instead of by win/loss outcome."""
     rules = []
     for cell in cells:
         key = cell["date"].isoformat()
-        if not cell["in_month"]:
+        if key in week_total_keys:
+            bg, border, color = accent_rgba(0.10), accent_rgba(0.35), ACCENT
+        elif not cell["in_month"]:
             bg, border, color = "transparent", "transparent", "rgba(161,161,170,0.35)"
         elif cell["outcome"] == "Win":
             bg, border, color = GOOD_BG, "rgba(34,197,94,0.35)", GOOD
@@ -715,9 +1016,15 @@ def calendar_cell_css(cells: list) -> str:
         else:
             bg, border, color = CARD_BG, BORDER, TEXT_SECONDARY
         ring = f"box-shadow: inset 0 0 0 2px {ACCENT};" if cell["is_today"] else ""
+        # Background/border go on the container (the whole cell "box"), not
+        # the button, so the box's painted area always exactly matches what
+        # Streamlit itself sizes the container to — the day number and P&L
+        # amount are both inside the SAME button label (see calendar_widget),
+        # so there's only one Streamlit-measured element per cell, not two.
         rules.append(
-            f'.st-key-calday-{key} button {{ background-color: {bg} !important; '
-            f'border: 1px solid {border} !important; color: {color} !important; {ring} }}'
+            f'.st-key-calday-{key} {{ background-color: {bg} !important; '
+            f'border: 1px solid {border} !important; {ring} }} '
+            f'.st-key-calday-{key} button {{ color: {color} !important; }}'
         )
     return f"<style>{' '.join(rules)}</style>"
 
@@ -734,6 +1041,8 @@ CARD_KEYS = [
     "card-breakdown",
     "card-drawdown",
     "card-heatmap",
+    "card-accent-settings",
+    "card-appearance-settings",
 ]
 
 

@@ -4,7 +4,7 @@ from data.db import init_db, get_all_accounts, get_daily_entries, coalesce
 from logic import analytics
 from ui import theme
 from ui.account_selector import set_selected_id
-from ui.dialogs import account_dialog
+from ui.dialogs import account_dialog, credentials_dialog
 from ui.format import fmt_currency_signed
 
 init_db()
@@ -60,9 +60,14 @@ for row_df in rows:
                 st.markdown(card_html, unsafe_allow_html=True)
 
                 st.write("")
-                b1, b2 = st.columns(2)
-                if b1.button("Open Dashboard", key=f"open-{acct['id']}", type="secondary", width="stretch"):
+                b1, b2, b3 = st.columns([3, 2, 1])
+                if b1.button("Dashboard", key=f"open-{acct['id']}", type="secondary", width="stretch"):
                     set_selected_id(int(acct["id"]))
                     st.switch_page("views/overview.py")
                 if b2.button("Edit", key=f"edit-{acct['id']}", type="secondary", width="stretch"):
                     account_dialog(acct.to_dict())
+                if b3.button(
+                    "", icon=":material/key:", key=f"cred-{acct['id']}", type="secondary",
+                    width="stretch", help="Trading account credentials",
+                ):
+                    credentials_dialog(acct.to_dict())

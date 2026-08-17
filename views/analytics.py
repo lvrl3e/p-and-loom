@@ -36,8 +36,15 @@ saturday_total = analytics.saturday_total(entries)
 best_day, worst_day = stats["best_day"], stats["worst_day"]
 streak_accent = theme.GOOD if streak["type"] == "Win" else (theme.BAD if streak["type"] == "Loss" else theme.NEUTRAL)
 
+total_trades = int(entries["trade_count"].sum()) if "trade_count" in entries else 0
+avg_trades_per_day = (total_trades / len(entries)) if len(entries) else 0.0
+
 with st.container(key="stat-row"):
     cards = [
+        theme.stat_card(
+            "Total Trades", str(total_trades), icon="layers", accent=theme.ACCENT,
+            sub=f"{avg_trades_per_day:.1f} avg / day",
+        ),
         theme.stat_card("Avg Winning Day", fmt_currency(stats["avg_daily_profit"]), icon="trending-up", accent=theme.GOOD),
         theme.stat_card("Avg Losing Day", fmt_currency(stats["avg_daily_loss"]), icon="trending-down", accent=theme.BAD),
         theme.stat_card(

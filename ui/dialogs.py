@@ -12,10 +12,12 @@ import streamlit as st
 from data import db, storage
 from ui import theme
 from ui.account_selector import set_selected_id
+from ui.format import fmt_currency_signed
 
 ACCOUNT_TYPES = ["Prop Firm", "Funded Account", "Personal", "Demo"]
 STATUSES = ["Active", "Passed", "Failed", "Archived"]
 COLOR_NAMES = ["Pink", "Blue", "Green", "Amber", "Violet", "Gray"]
+DRAWDOWN_TYPES = ["Trailing", "Static"]
 
 
 def _color_name(hex_value: str) -> str:
@@ -28,6 +30,10 @@ def _color_name(hex_value: str) -> str:
 @st.dialog("Daily Entry")
 def daily_entry_dialog(account: dict, entry_date: dt.date):
     existing = db.get_daily_entry(account["id"], entry_date.isoformat())
+    entry_id = existing["id"] if existing else None
+    trades = db.get_trade_entries(entry_id) if entry_id else []
+    total_pnl = sum(t["pnl"] for t in trades)
+    outcome = "Win" if total_pnl > 0 else ("Loss" if total_pnl < 0 else ("Breakeven" if trades else None))
 
     st.markdown(
         f'<div style="font-family:\'Space Grotesk\',sans-serif; font-size:1.15rem; font-weight:700; '
@@ -36,22 +42,57 @@ def daily_entry_dialog(account: dict, entry_date: dt.date):
     )
     st.caption(account["name"])
 
-    pnl = st.number_input(
-        "Daily P&L ($)", value=float(existing["pnl"]) if existing else 0.0, step=10.0, format="%.2f"
+    st.markdown(
+        f'<div class="tj-stat-value" style="color:{theme.pnl_color(total_pnl) if trades else theme.TEXT_PRIMARY};">'
+        f'{fmt_currency_signed(total_pnl) if trades else "$0.00"}</div>'
+        f'<div class="tj-stat-sub">{len(trades)} trade{"s" if len(trades) != 1 else ""} logged</div>',
+        unsafe_allow_html=True,
     )
-    outcome = "Win" if pnl > 0 else ("Loss" if pnl < 0 else "Breakeven")
-    st.markdown(theme.outcome_badge(outcome), unsafe_allow_html=True)
+    if outcome:
+        st.markdown(theme.outcome_badge(outcome), unsafe_allow_html=True)
 
+    st.write("")
+    st.markdown("**Trades**")
+    if trades:
+        for t in trades:
+            tc1, tc2 = st.columns([4, 1])
+            with tc1:
+                st.markdown(
+                    f'<div style="padding:8px 0; color:{theme.pnl_color(t["pnl"])}; font-weight:600; '
+                    f'font-variant-numeric:tabular-nums;">{fmt_currency_signed(t["pnl"])}</div>',
+                    unsafe_allow_html=True,
+                )
+            with tc2:
+                if st.button("✕", key=f"deltrade-{t['id']}", type="secondary", width="stretch"):
+                    db.delete_trade_entry(t["id"])
+                    db.recompute_daily_pnl(entry_id)
+                    st.rerun()
+    else:
+        st.caption("No trades logged yet for this day.")
+
+    with st.form(f"add_trade_form_{entry_date.isoformat()}_{account['id']}", clear_on_submit=True):
+        fc1, fc2 = st.columns([2, 1])
+        with fc1:
+            new_trade_pnl = st.number_input("Trade P&L ($)", value=0.0, step=10.0, format="%.2f", label_visibility="collapsed")
+        with fc2:
+            add_trade = st.form_submit_button("＋ Add", type="secondary", width="stretch")
+    if add_trade:
+        eid = entry_id or db.ensure_daily_entry(account["id"], entry_date.isoformat())
+        db.add_trade_entry(eid, new_trade_pnl)
+        db.recompute_daily_pnl(eid)
+        st.rerun()
+
+    st.write("")
     notes = st.text_area(
         "Notes",
         value=existing["notes"] if existing and existing["notes"] else "",
-        height=120,
+        height=100,
         placeholder="What happened today? Plan followed, mistakes, lessons...",
     )
 
-    st.markdown("**Screenshots**")
-    if existing:
-        shots = db.get_screenshots(existing["id"])
+    st.markdown("**Screenshots** — attach as many as you want")
+    if entry_id:
+        shots = db.get_screenshots(entry_id)
         if shots:
             cols = st.columns(4)
             for i, shot in enumerate(shots):
@@ -70,15 +111,16 @@ def daily_entry_dialog(account: dict, entry_date: dt.date):
 
     col1, col2 = st.columns(2)
     if col1.button("Save", type="primary", width="stretch"):
-        entry_id = db.upsert_daily_entry(account["id"], entry_date.isoformat(), pnl, notes or None)
+        eid = entry_id or db.ensure_daily_entry(account["id"], entry_date.isoformat())
+        db.set_daily_notes(eid, notes or None)
         for f in uploaded or []:
             path = storage.save_screenshot(f, account["id"], entry_date.isoformat())
-            db.add_screenshot(entry_id, path)
+            db.add_screenshot(eid, path)
         st.rerun()
-    if existing and col2.button("Delete Entry", type="secondary", width="stretch"):
-        for shot in db.get_screenshots(existing["id"]):
+    if entry_id and col2.button("Delete Entire Day", type="secondary", width="stretch"):
+        for shot in db.get_screenshots(entry_id):
             storage.delete_screenshot_file(shot["file_path"])
-        db.delete_daily_entry(existing["id"])
+        db.delete_daily_entry(entry_id)
         st.rerun()
 
 
@@ -134,6 +176,12 @@ def account_dialog(account: dict | None = None):
             "Max Drawdown Limit ($)", min_value=0.0, step=100.0,
             value=float(db.coalesce(account.get("max_drawdown_limit"), 0)) if is_edit else 0.0,
         )
+        drawdown_type_label = st.selectbox(
+            "Drawdown Type", DRAWDOWN_TYPES,
+            index=DRAWDOWN_TYPES.index("Static") if is_edit and account.get("drawdown_type") == "static" else 0,
+            help="Trailing: the limit follows your highest balance reached (most prop firms). "
+                 "Static: the limit stays fixed at your starting balance and never moves up.",
+        )
         daily_loss_limit = st.number_input(
             "Daily Loss Limit ($)", min_value=0.0, step=100.0,
             value=float(db.coalesce(account.get("daily_loss_limit"), 0)) if is_edit else 0.0,
@@ -154,6 +202,7 @@ def account_dialog(account: dict | None = None):
                 status=status,
                 profit_target=profit_target or None,
                 max_drawdown_limit=max_drawdown_limit or None,
+                drawdown_type=drawdown_type_label.lower(),
                 daily_loss_limit=daily_loss_limit or None,
             )
             if is_edit:
@@ -169,4 +218,30 @@ def account_dialog(account: dict | None = None):
             storage.delete_screenshot_file(row["file_path"])
         db.delete_account(account["id"])
         set_selected_id(None)
+        st.rerun()
+
+
+@st.dialog("Trading Credentials")
+def credentials_dialog(account: dict):
+    st.markdown(
+        f'<div style="font-family:\'Space Grotesk\',sans-serif; font-size:1.15rem; font-weight:700; '
+        f'color:{theme.TEXT_PRIMARY};">{theme.esc(account["name"])}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption("Stored locally in your SQLite database, unencrypted — never committed to git (see .gitignore).")
+
+    account_number = st.text_input(
+        "Account Number", value=db.coalesce(account.get("login_account_number"), ""),
+        placeholder="e.g. 1234567",
+    )
+    password = st.text_input(
+        "Password", value=db.coalesce(account.get("login_password"), ""),
+        type="password",
+    )
+
+    if st.button("Save", type="primary", width="stretch"):
+        db.update_account(account["id"], {
+            "login_account_number": account_number.strip() or None,
+            "login_password": password or None,
+        })
         st.rerun()

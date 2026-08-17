@@ -42,6 +42,25 @@ def max_drawdown(equity_df: pd.DataFrame) -> float:
     return float(drawdown.min())
 
 
+def current_drawdown(equity_df: pd.DataFrame, starting_balance: float, drawdown_type: str = "trailing") -> float:
+    """Live distance below the drawdown reference point right now — not the
+    worst historical dip (see max_drawdown()), but where the account
+    actually stands against its limit today. "Trailing" (default, and how
+    most prop firms define it) measures from the running peak balance, so
+    the reference ratchets up with every new high. "Static" measures from
+    the fixed starting balance, which never moves regardless of any
+    interim peak. Returned as a non-negative "amount used"; 0 when the
+    balance is at or above the reference."""
+    if equity_df.empty:
+        return 0.0
+    current_balance = float(equity_df["balance"].iloc[-1])
+    if drawdown_type == "static":
+        reference = starting_balance
+    else:
+        reference = float(equity_df["balance"].cummax().iloc[-1])
+    return max(0.0, reference - current_balance)
+
+
 def drawdown_series(equity_df: pd.DataFrame) -> pd.DataFrame:
     """Drawdown from the running peak balance, for the Analytics drawdown chart."""
     if equity_df.empty:
@@ -129,34 +148,52 @@ def summary_stats(df: pd.DataFrame, starting_balance: float) -> dict:
     }
 
 
-def prop_firm_progress(stats: dict, account: dict) -> dict:
+def prop_firm_progress(stats: dict, account: dict, equity_df: pd.DataFrame) -> dict:
     """None-safe progress toward an account's configured profit target /
-    drawdown limit / daily loss limit — accounts don't have to set these."""
+    drawdown limit / daily loss limit — accounts don't have to set these.
+
+    account is typically built via .iloc[...].to_dict() on a DataFrame row
+    upstream, which re-coerces a stored NULL into float NaN (the same
+    footgun data.db.coalesce() exists for) — NaN is truthy in Python, so a
+    plain `if value:` would treat "not set" as "set to NaN" and silently
+    produce nonsense percentages. pd.notna() guards against that below."""
     total_pnl = stats["total_pnl"]
 
     target = account.get("profit_target")
     target_progress_pct = None
     remaining_to_target = None
-    if target:
+    if pd.notna(target):
         target_progress_pct = max(0.0, min(100.0, total_pnl / target * 100))
         remaining_to_target = max(0.0, target - total_pnl)
+    else:
+        target = None
 
     dd_limit = account.get("max_drawdown_limit")
+    raw_drawdown_type = account.get("drawdown_type")
+    drawdown_type = raw_drawdown_type if isinstance(raw_drawdown_type, str) and raw_drawdown_type else "trailing"
+    drawdown_used = None
     distance_to_drawdown = None
     drawdown_used_pct = None
-    if dd_limit:
-        current_drawdown = abs(stats["max_drawdown"])
-        distance_to_drawdown = max(0.0, dd_limit - current_drawdown)
-        drawdown_used_pct = max(0.0, min(100.0, current_drawdown / dd_limit * 100))
+    if pd.notna(dd_limit):
+        drawdown_used = current_drawdown(equity_df, stats["starting_balance"], drawdown_type)
+        distance_to_drawdown = max(0.0, dd_limit - drawdown_used)
+        drawdown_used_pct = max(0.0, min(100.0, drawdown_used / dd_limit * 100))
+    else:
+        dd_limit = None
+
+    daily_loss_limit = account.get("daily_loss_limit")
+    daily_loss_limit = daily_loss_limit if pd.notna(daily_loss_limit) else None
 
     return {
         "profit_target": target,
         "target_progress_pct": target_progress_pct,
         "remaining_to_target": remaining_to_target,
         "max_drawdown_limit": dd_limit,
+        "drawdown_type": drawdown_type,
+        "current_drawdown": drawdown_used,
         "distance_to_drawdown": distance_to_drawdown,
         "drawdown_used_pct": drawdown_used_pct,
-        "daily_loss_limit": account.get("daily_loss_limit"),
+        "daily_loss_limit": daily_loss_limit,
     }
 
 
@@ -194,7 +231,7 @@ def _group_and_format(tagged: pd.DataFrame, group_col: str) -> pd.DataFrame:
 
 
 def calendar_matrix(df: pd.DataFrame, year: int, month: int, today) -> list:
-    """Weeks (Mon-start) covering the given month, each a list of 7 dicts:
+    """Weeks (Sun-start) covering the given month, each a list of 7 dicts:
     {date, in_month, pnl, outcome, is_today}. pnl/outcome are None on days
     with no entry."""
     import calendar as _calendar
@@ -206,7 +243,7 @@ def calendar_matrix(df: pd.DataFrame, year: int, month: int, today) -> list:
             by_date[row["entry_date"].date()] = (row["pnl"], row["outcome"])
 
     weeks = []
-    for week in _calendar.Calendar(firstweekday=0).monthdatescalendar(year, month):
+    for week in _calendar.Calendar(firstweekday=6).monthdatescalendar(year, month):
         week_out = []
         for date in week:
             pnl, outcome = by_date.get(date, (None, None))

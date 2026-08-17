@@ -1,8 +1,12 @@
-# Trading Journal
+<img src="./p-and-loom-logo.png" alt="P&Loom Logo" width="140"/>
+
+# P&Loom
+
+*Trade. Track. Grow.*
 
 A modern **trading performance journal built for prop-firm and funded-account traders**. Track multiple trading accounts, log daily profit and loss, review performance through a calendar, and keep notes and screenshots for every trading day.
 
-![Trading Journal Dashboard](docs/screenshots/dashboard.png)
+![P&Loom Dashboard](dashboard.png)
 
 ## ✨ Features
 
@@ -84,6 +88,7 @@ Visualize account performance with:
 * Daily performance
 * Drawdown
 * Monthly performance
+* A GitHub-style calendar heatmap of P&L intensity across the year
 
 Filter performance by different time periods such as:
 
@@ -116,7 +121,7 @@ Useful for saving:
 
 ## 🎨 Design
 
-Trading Journal uses a **dark trading-terminal inspired interface** with a modern SaaS aesthetic.
+P&Loom uses a **dark trading-terminal inspired interface** with a modern SaaS aesthetic.
 
 * Dark UI
 * Pink accent color
@@ -129,27 +134,31 @@ Trading Journal uses a **dark trading-terminal inspired interface** with a moder
 ## 📁 Project Structure
 
 ```text
-Trading-Journal/
-├── app.py
+p-and-loom/
+├── app.py                    # st.navigation entry point + sidebar
 │
 ├── views/
-│   ├── overview.py
-│   ├── accounts.py
-│   ├── journal.py
-│   ├── calendar.py
-│   └── analytics.py
+│   ├── overview.py            # Dashboard: KPIs, balance chart, progress, calendar preview
+│   ├── accounts.py            # Account cards + add/edit/delete
+│   ├── journal.py             # Daily Journal table
+│   ├── calendar.py            # Full month calendar
+│   ├── analytics.py           # Breakdowns, drawdown, streaks, heatmap
+│   └── screenshots.py         # Screenshot gallery
 │
 ├── data/
-│   └── db.py
+│   ├── db.py                  # SQLite: accounts, daily_entries, screenshots
+│   └── storage.py             # Screenshot file storage (uploads/)
 │
 ├── logic/
-│   ├── calculations.py
-│   └── analytics.py
+│   └── analytics.py           # Daily-P&L aggregation, streaks, prop-firm progress
 │
 ├── ui/
-│   ├── theme.py
-│   ├── charts.py
-│   └── format.py
+│   ├── theme.py                # Color tokens, CSS, HTML components
+│   ├── charts.py                # Plotly figure builders
+│   ├── format.py                # Display formatting helpers
+│   ├── account_selector.py      # Shared account-selection state/widget
+│   ├── calendar_widget.py       # Shared month-grid renderer
+│   └── dialogs.py               # Daily Entry / Account modals
 │
 ├── docs/
 │   └── screenshots/
@@ -216,8 +225,8 @@ The project keeps the data layer, calculations, analytics, and UI separated so i
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/<your-username>/<repository-name>.git
-cd Trading-Journal
+git clone https://github.com/lvrl3e/p-and-loom.git
+cd p-and-loom
 ```
 
 ### 2. Create a virtual environment
@@ -246,8 +255,11 @@ pip install -r requirements.txt
 
 ```bash
 streamlit run app.py
+```
 
-On Windows, you can also run Streamlit directly through the virtual environment:
+On Windows, if `streamlit` isn't on your PATH or the activation script is blocked by execution policy, run it directly through the virtual environment instead:
+
+```powershell
 .\.venv\Scripts\streamlit.exe run app.py --server.headless true
 ```
 
@@ -255,15 +267,15 @@ The application will open in your browser.
 
 ## 💾 Data Storage
 
-Trading Journal currently uses **SQLite** for local data storage.
+P&Loom currently uses **SQLite** for local data storage.
 
-The database stores account information and daily journal entries, including P&L, notes, and related data.
+The database stores account information and daily journal entries, including P&L, notes, and related data. The local database file is created automatically when the application starts.
 
-The local database file is created automatically when the application starts.
+Uploaded screenshots are saved to a local `uploads/` folder (gitignored, one subfolder per account/date) rather than in the database — the `screenshots` table just stores each file's path.
 
 ## 🔒 Privacy
 
-Trading Journal is designed to keep your journal data under your control when running locally.
+P&Loom is designed to keep your journal data under your control when running locally.
 
 Avoid committing sensitive information such as:
 
@@ -277,19 +289,17 @@ Add sensitive files to `.gitignore` before pushing the project to GitHub.
 
 ## 📌 Project Status
 
-Trading Journal is actively being developed with a focus on creating a simple but powerful journaling experience for traders managing multiple accounts.
+P&Loom is actively being developed with a focus on creating a simple but powerful journaling experience for traders managing multiple accounts.
 
 Future improvements may include:
 
 * Advanced prop-firm rule tracking
 * More analytics
 * Account comparison
-* Calendar heatmaps
 * Exporting journal data
 * Cloud database support
 * Authentication and user accounts
 
 ---
 
-**Trading Journal** — Track the day. Understand the performance. Improve the process.
-v
+**P&Loom** — Track the day. Understand the performance. Improve the process.

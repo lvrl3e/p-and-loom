@@ -4,17 +4,18 @@ from data.db import init_db, get_all_accounts
 from ui import theme
 from ui.account_selector import ensure_selection, get_selected_id, ALL_ACCOUNTS
 
-st.set_page_config(page_title="Trading Journal", page_icon="📈", layout="wide")
-theme.inject_css()
+st.set_page_config(page_title="P&Loom", page_icon="docs/logo-icon.png", layout="wide")
 init_db()
+theme.apply_theme()
+theme.inject_css()
 
 with st.sidebar:
     st.markdown(
-        """
+        f"""
         <div class="tj-brand">
-            <div class="tj-brand-mark">TJ</div>
+            <img src="{theme.logo_icon_data_uri()}" class="tj-brand-mark-img" alt="P&Loom" />
             <div>
-                <div class="tj-brand-name">Trading Journal</div>
+                <div class="tj-brand-name">P&amp;Loom</div>
                 <div class="tj-brand-sub"><span class="tj-pulse-dot"></span>Live · local session</div>
             </div>
         </div>
@@ -28,8 +29,9 @@ journal = st.Page("views/journal.py", title="Daily Journal", icon=":material/rec
 calendar_page = st.Page("views/calendar.py", title="Calendar", icon=":material/calendar_month:")
 analytics_page = st.Page("views/analytics.py", title="Analytics", icon=":material/insights:")
 screenshots_page = st.Page("views/screenshots.py", title="Screenshots", icon=":material/image:")
+settings_page = st.Page("views/settings.py", title="Settings", icon=":material/settings:")
 
-pg = st.navigation([overview, accounts_page, journal, calendar_page, analytics_page, screenshots_page])
+pg = st.navigation([overview, accounts_page, journal, calendar_page, analytics_page, screenshots_page, settings_page])
 
 accounts_df = get_all_accounts()
 ensure_selection(accounts_df)
