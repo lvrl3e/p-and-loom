@@ -17,6 +17,7 @@ from ui.format import fmt_currency_signed
 ACCOUNT_TYPES = ["Prop Firm", "Funded Account", "Personal", "Demo"]
 STATUSES = ["Active", "Passed", "Failed", "Archived"]
 COLOR_NAMES = ["Pink", "Blue", "Green", "Amber", "Violet", "Gray"]
+DRAWDOWN_TYPES = ["Trailing", "Static"]
 
 
 def _color_name(hex_value: str) -> str:
@@ -175,6 +176,12 @@ def account_dialog(account: dict | None = None):
             "Max Drawdown Limit ($)", min_value=0.0, step=100.0,
             value=float(db.coalesce(account.get("max_drawdown_limit"), 0)) if is_edit else 0.0,
         )
+        drawdown_type_label = st.selectbox(
+            "Drawdown Type", DRAWDOWN_TYPES,
+            index=DRAWDOWN_TYPES.index("Static") if is_edit and account.get("drawdown_type") == "static" else 0,
+            help="Trailing: the limit follows your highest balance reached (most prop firms). "
+                 "Static: the limit stays fixed at your starting balance and never moves up.",
+        )
         daily_loss_limit = st.number_input(
             "Daily Loss Limit ($)", min_value=0.0, step=100.0,
             value=float(db.coalesce(account.get("daily_loss_limit"), 0)) if is_edit else 0.0,
@@ -195,6 +202,7 @@ def account_dialog(account: dict | None = None):
                 status=status,
                 profit_target=profit_target or None,
                 max_drawdown_limit=max_drawdown_limit or None,
+                drawdown_type=drawdown_type_label.lower(),
                 daily_loss_limit=daily_loss_limit or None,
             )
             if is_edit:
@@ -210,4 +218,30 @@ def account_dialog(account: dict | None = None):
             storage.delete_screenshot_file(row["file_path"])
         db.delete_account(account["id"])
         set_selected_id(None)
+        st.rerun()
+
+
+@st.dialog("Trading Credentials")
+def credentials_dialog(account: dict):
+    st.markdown(
+        f'<div style="font-family:\'Space Grotesk\',sans-serif; font-size:1.15rem; font-weight:700; '
+        f'color:{theme.TEXT_PRIMARY};">{theme.esc(account["name"])}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption("Stored locally in your SQLite database, unencrypted — never committed to git (see .gitignore).")
+
+    account_number = st.text_input(
+        "Account Number", value=db.coalesce(account.get("login_account_number"), ""),
+        placeholder="e.g. 1234567",
+    )
+    password = st.text_input(
+        "Password", value=db.coalesce(account.get("login_password"), ""),
+        type="password",
+    )
+
+    if st.button("Save", type="primary", width="stretch"):
+        db.update_account(account["id"], {
+            "login_account_number": account_number.strip() or None,
+            "login_password": password or None,
+        })
         st.rerun()

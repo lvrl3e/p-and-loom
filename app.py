@@ -5,9 +5,9 @@ from ui import theme
 from ui.account_selector import ensure_selection, get_selected_id, ALL_ACCOUNTS
 
 st.set_page_config(page_title="P&Loom", page_icon="docs/logo-icon.png", layout="wide")
+init_db()
 theme.apply_theme()
 theme.inject_css()
-init_db()
 
 with st.sidebar:
     st.markdown(
@@ -29,8 +29,9 @@ journal = st.Page("views/journal.py", title="Daily Journal", icon=":material/rec
 calendar_page = st.Page("views/calendar.py", title="Calendar", icon=":material/calendar_month:")
 analytics_page = st.Page("views/analytics.py", title="Analytics", icon=":material/insights:")
 screenshots_page = st.Page("views/screenshots.py", title="Screenshots", icon=":material/image:")
+settings_page = st.Page("views/settings.py", title="Settings", icon=":material/settings:")
 
-pg = st.navigation([overview, accounts_page, journal, calendar_page, analytics_page, screenshots_page])
+pg = st.navigation([overview, accounts_page, journal, calendar_page, analytics_page, screenshots_page, settings_page])
 
 accounts_df = get_all_accounts()
 ensure_selection(accounts_df)

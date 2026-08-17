@@ -6,10 +6,13 @@ hand-styled look on top of Streamlit's defaults.
 """
 
 import base64
+import colorsys
 import html
 import os
 
 import streamlit as st
+
+from data.db import delete_setting, get_setting, set_setting
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 _LOGO_ICON_PATH = os.path.join(_PROJECT_ROOT, "docs", "logo-icon.png")
@@ -92,8 +95,101 @@ NEUTRAL_BG = _DARK["NEUTRAL_BG"]
 
 CURRENT_MODE = "dark"
 
+DEFAULT_ACCENT = _DARK["ACCENT"]
+
+# Curated presets shown as swatches in Settings, spanning distinct hues so
+# the pink brand color isn't the only easy pick.
+ACCENT_PRESETS = ["#E85D9E", "#2A78D6", "#1BAF7A", "#EDA100", "#4A3AA7", "#E8555D", "#17B8B0"]
 
 _SESSION_KEY = "_theme_mode"
+_ACCENT_SETTING_KEY = "accent_color"
+_MODE_SETTING_KEY = "theme_mode_override"
+
+
+def _hex_to_rgb01(hex_color: str) -> tuple:
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+def _rgb01_to_hex(rgb: tuple) -> str:
+    return "#" + "".join(f"{max(0, min(255, round(c * 255))):02X}" for c in rgb)
+
+
+def hex_to_rgba(hex_color: str, alpha: float) -> str:
+    """rgba(...) string for a hex color — used to derive translucent tints
+    (hover backgrounds, icon chips, card borders) from whatever the active
+    ACCENT is, instead of hardcoding the brand pink's rgb triplet."""
+    r, g, b = (round(c * 255) for c in _hex_to_rgb01(hex_color))
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def accent_rgba(alpha: float) -> str:
+    return hex_to_rgba(ACCENT, alpha)
+
+
+def _adjust_lightness(hex_color: str, delta: float) -> str:
+    h, l, s = colorsys.rgb_to_hls(*_hex_to_rgb01(hex_color))
+    l = max(0.0, min(1.0, l + delta))
+    return _rgb01_to_hex(colorsys.hls_to_rgb(h, l, s))
+
+
+def _contrast_text(hex_color: str) -> str:
+    r, g, b = _hex_to_rgb01(hex_color)
+    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return "#0D0D0F" if luminance > 0.55 else "#F5F5F5"
+
+
+def _derive_accent_tokens(base_hex: str, mode: str) -> dict:
+    """Derives hover/soft/light/on-accent variants from a single base
+    color, mirroring the relationship the hand-picked dark/light palettes
+    above already have between their own ACCENT and ACCENT_HOVER/
+    ACCENT_SOFT/ACCENT_LIGHT — so a user-picked accent slots in without
+    needing its own picker for every derived token."""
+    if mode == "dark":
+        hover = _adjust_lightness(base_hex, 0.08)
+        soft = _adjust_lightness(base_hex, 0.22)
+    else:
+        hover = _adjust_lightness(base_hex, -0.10)
+        soft = base_hex
+    return dict(
+        ACCENT=base_hex,
+        ACCENT_HOVER=hover,
+        ACCENT_SOFT=soft,
+        ACCENT_LIGHT=_adjust_lightness(base_hex, 0.38),
+        ON_ACCENT=_contrast_text(base_hex),
+    )
+
+
+def get_custom_accent() -> str | None:
+    return get_setting(_ACCENT_SETTING_KEY)
+
+
+def set_custom_accent(hex_color: str | None) -> None:
+    """Pass None (or the default accent) to reset to the built-in palette."""
+    if hex_color and hex_color.upper() != DEFAULT_ACCENT.upper():
+        set_setting(_ACCENT_SETTING_KEY, hex_color)
+    else:
+        delete_setting(_ACCENT_SETTING_KEY)
+
+
+def get_mode_override() -> str | None:
+    """Manual light/dark override, saved in Settings — takes priority over
+    auto-detection. Returns None for "Auto" (follow the viewer's browser)."""
+    value = get_setting(_MODE_SETTING_KEY)
+    return value if value in ("light", "dark") else None
+
+
+def set_mode_override(mode: str | None) -> None:
+    """Pass "light"/"dark" to force a mode, or None to go back to
+    auto-detecting from the browser's prefers-color-scheme."""
+    if mode in ("light", "dark"):
+        set_setting(_MODE_SETTING_KEY, mode)
+    else:
+        delete_setting(_MODE_SETTING_KEY)
+    # Drop the cached auto-detected reading so a switch back to "Auto"
+    # re-detects fresh instead of replaying a stale value from earlier in
+    # this session (see apply_theme()'s docstring for why that's cached).
+    st.session_state.pop(_SESSION_KEY, None)
 
 
 def apply_theme() -> str:
@@ -103,7 +199,8 @@ def apply_theme() -> str:
     "light" (also stored as CURRENT_MODE) in case a caller needs to branch
     on it directly (e.g. Plotly template choice).
 
-    st.context.theme.type only reflects the browser's real
+    A manual override saved via Settings (get_mode_override()) always wins.
+    Otherwise, st.context.theme.type only reflects the browser's real
     prefers-color-scheme on a session's very first script run — confirmed
     empirically, not a guess: on every later rerun (which includes every
     st.navigation page switch, since those go over the same WebSocket
@@ -112,17 +209,26 @@ def apply_theme() -> str:
     reused for the rest of the session instead of re-trusting it each run.
     """
     global CURRENT_MODE
-    cached = st.session_state.get(_SESSION_KEY)
-    if cached in ("light", "dark"):
-        mode = cached
+    override = get_mode_override()
+    if override:
+        mode = override
     else:
-        try:
-            theme_type = st.context.theme.type
-        except Exception:
-            theme_type = None
-        mode = theme_type if theme_type in ("light", "dark") else "dark"
-        st.session_state[_SESSION_KEY] = mode
+        cached = st.session_state.get(_SESSION_KEY)
+        if cached in ("light", "dark"):
+            mode = cached
+        else:
+            try:
+                theme_type = st.context.theme.type
+            except Exception:
+                theme_type = None
+            mode = theme_type if theme_type in ("light", "dark") else "dark"
+            st.session_state[_SESSION_KEY] = mode
     globals().update(_LIGHT if mode == "light" else _DARK)
+
+    custom_accent = get_custom_accent()
+    if custom_accent:
+        globals().update(_derive_accent_tokens(custom_accent, mode))
+
     CURRENT_MODE = mode
     return mode
 
@@ -155,6 +261,10 @@ _ICON_PATHS = {
     "flame": '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path>',
     "flag": '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line>',
     "shield": '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>',
+    "wave": '<path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"></path><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path>',
+    "heart": '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>',
+    "settings": '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>',
+    "moon": '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>',
 }
 
 
@@ -226,7 +336,7 @@ def inject_css() -> None:
             border-bottom: 1px solid {BORDER};
         }}
         [data-testid="stMainBlockContainer"] {{
-            padding-top: 2.75rem;
+            padding-top: 4.5rem;
         }}
 
         /* Sidebar */
@@ -243,7 +353,7 @@ def inject_css() -> None:
             transition: background-color 0.15s ease;
         }}
         [data-testid="stSidebarNavLink"]:hover {{
-            background-color: rgba(232, 93, 158, 0.10);
+            background-color: {accent_rgba(0.10)};
         }}
         [data-testid="stSidebarNavLink"] span {{
             color: {TEXT_SECONDARY} !important;
@@ -361,6 +471,8 @@ def inject_css() -> None:
             font-weight: 600;
             padding: 0.5rem 1.25rem;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
             transition: background-color 0.15s ease;
         }}
         .stButton > button:hover, .stFormSubmitButton > button:hover,
@@ -382,9 +494,84 @@ def inject_css() -> None:
             border-radius: 10px;
         }}
 
+        /* Native widgets (segmented_control, tabs) bake Streamlit's config.toml
+           primaryColor into their selected-state styling at render time, so a
+           custom accent needs an explicit override here to actually reach them. */
+        button[data-variant="segmented_control"][aria-checked="true"] {{
+            color: {ACCENT} !important;
+            background-color: {accent_rgba(0.1)} !important;
+            border-color: {ACCENT} !important;
+        }}
+        .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {{
+            color: {ACCENT} !important;
+        }}
+        .stTabs [data-baseweb="tab-highlight"] {{
+            background-color: {ACCENT} !important;
+        }}
+
+        /* Text/number inputs, textareas, and selectboxes render with
+           Streamlit's hardcoded light-theme chrome (a white box, dark text)
+           regardless of our palette, since no [theme] base is set in
+           config.toml — overridden here so every input surface matches
+           CARD_BG/TEXT_PRIMARY in both light and dark mode. */
+        [data-testid="stTextInput"] .react-aria-TextField,
+        [data-testid="stTextInput"] .react-aria-TextField > div,
+        [data-testid="stTextArea"] .react-aria-TextField,
+        [data-testid="stTextArea"] .react-aria-TextField > div,
+        [data-testid="stNumberInputContainer"],
+        [data-testid="stSelectbox"] [role="group"] {{
+            background-color: {CARD_BG} !important;
+            border-color: {BORDER} !important;
+            color: {TEXT_PRIMARY} !important;
+        }}
+        [data-testid="stTextInput"] input,
+        [data-testid="stTextArea"] textarea,
+        [data-testid="stNumberInputField"],
+        [data-testid="stSelectbox"] input {{
+            color: {TEXT_PRIMARY} !important;
+        }}
+        [data-testid="stTextInput"] input::placeholder,
+        [data-testid="stTextArea"] textarea::placeholder,
+        [data-testid="stSelectbox"] input::placeholder {{
+            color: {TEXT_SECONDARY} !important;
+            opacity: 1;
+        }}
+        [data-testid="stSelectboxVirtualDropdown"] {{
+            background-color: {CARD_BG} !important;
+            border: 1px solid {BORDER} !important;
+        }}
+        [role="option"] {{
+            color: {TEXT_PRIMARY} !important;
+        }}
+        [role="option"]:hover, [role="option"][aria-selected="true"] {{
+            background-color: {accent_rgba(0.12)} !important;
+        }}
+
         /* Cards (via st.container(key=...)) — fixed, known-in-advance keys */
         {" ".join(f'.st-key-{key} {{ background-color: {CARD_BG}; border: 1px solid {BORDER}; border-radius: 16px; padding: 22px 24px; margin-bottom: 4px; transition: border-color 0.15s ease; }}' for key in CARD_KEYS)}
-        {" ".join(f'.st-key-{key}:hover {{ border-color: rgba(232, 93, 158, 0.35); }}' for key in CARD_KEYS)}
+        {" ".join(f'.st-key-{key}:hover {{ border-color: {accent_rgba(0.35)}; }}' for key in CARD_KEYS)}
+
+        /* Accent-color swatch buttons on the Settings page — one rule per
+           preset hex, keyed by st.button(key=f"preset-{{hex}}"). */
+        {" ".join(
+            f'.st-key-preset-{p.lstrip("#")} button {{ background-color: {p} !important; '
+            f'border-radius: 8px !important; height: 34px !important; min-height: 34px !important; '
+            f'padding: 0 !important; border: 2px solid '
+            f'{ACCENT if p.upper() == ACCENT.upper() else "transparent"} !important; '
+            f'box-shadow: 0 0 0 1px {BORDER} !important; }}'
+            for p in ACCENT_PRESETS
+        )}
+
+        /* Icon-only buttons (e.g. the account-card credentials key button)
+           — the default text-button padding leaves an icon off-center and
+           the button taller/narrower than its row siblings, so this trims
+           padding to 0 and lets the icon center itself. */
+        [class*="st-key-cred-"] button {{
+            padding: 0 !important;
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+        }}
 
         /* Cards with dynamic, data-driven keys (account id, screenshot id, ...) —
            matched by prefix since the exact key set isn't known up front. */
@@ -398,7 +585,7 @@ def inject_css() -> None:
             transition: border-color 0.15s ease, transform 0.15s ease;
         }}
         [class*="st-key-acct-"]:hover {{
-            border-color: rgba(232, 93, 158, 0.35);
+            border-color: {accent_rgba(0.35)};
             transform: translateY(-2px);
         }}
         [class*="st-key-shot-"] {{
@@ -409,7 +596,7 @@ def inject_css() -> None:
             transition: border-color 0.15s ease;
         }}
         [class*="st-key-shot-"]:hover {{
-            border-color: rgba(232, 93, 158, 0.35);
+            border-color: {accent_rgba(0.35)};
         }}
         [class*="st-key-calday-"] {{
             border-radius: 10px;
@@ -442,7 +629,7 @@ def inject_css() -> None:
             width: 42px;
             height: 42px;
             border-radius: 12px;
-            background: rgba(232, 93, 158, 0.12);
+            background: {accent_rgba(0.12)};
             color: {ACCENT};
             display: flex;
             align-items: center;
@@ -474,7 +661,7 @@ def inject_css() -> None:
             width: 26px;
             height: 26px;
             border-radius: 8px;
-            background: rgba(232, 93, 158, 0.12);
+            background: {accent_rgba(0.12)};
             color: {ACCENT};
             display: flex;
             align-items: center;
@@ -644,7 +831,7 @@ def inject_css() -> None:
             display: inline-block;
             background: transparent;
             color: {ACCENT_SOFT};
-            border: 1px solid rgba(244, 166, 193, 0.35);
+            border: 1px solid {hex_to_rgba(ACCENT_SOFT, 0.35)};
             font-size: 0.72rem;
             font-weight: 600;
             padding: 2px 10px;
@@ -662,7 +849,7 @@ def inject_css() -> None:
         .tj-badge-good {{ color: {GOOD}; background: {GOOD_BG}; }}
         .tj-badge-bad {{ color: {BAD}; background: {BAD_BG}; }}
         .tj-badge-neutral {{ color: {TEXT_SECONDARY}; background: {NEUTRAL_BG}; }}
-        .tj-badge-accent {{ color: {ACCENT}; background: rgba(232, 93, 158, 0.12); }}
+        .tj-badge-accent {{ color: {ACCENT}; background: {accent_rgba(0.12)}; }}
 
         .tj-progress-track {{
             width: 100%;
@@ -803,16 +990,22 @@ def inject_css() -> None:
     )
 
 
-def calendar_cell_css(cells: list) -> str:
+def calendar_cell_css(cells: list, week_total_keys: frozenset = frozenset()) -> str:
     """One small CSS rule per calendar day (~28-42 per month) so each button
     can be colored by that day's outcome without per-instance inline style,
     which Streamlit's rendered wrapper divs don't accept. Injected once per
     calendar render, right before the grid — same technique CARD_KEYS uses
-    for the fixed containers, just data-driven instead of static."""
+    for the fixed containers, just data-driven instead of static.
+
+    week_total_keys are Saturday cells repurposed to show that week's P&L
+    sum (see calendar_widget.render_month) — styled as a distinct
+    accent-tinted summary slot instead of by win/loss outcome."""
     rules = []
     for cell in cells:
         key = cell["date"].isoformat()
-        if not cell["in_month"]:
+        if key in week_total_keys:
+            bg, border, color = accent_rgba(0.10), accent_rgba(0.35), ACCENT
+        elif not cell["in_month"]:
             bg, border, color = "transparent", "transparent", "rgba(161,161,170,0.35)"
         elif cell["outcome"] == "Win":
             bg, border, color = GOOD_BG, "rgba(34,197,94,0.35)", GOOD
@@ -848,6 +1041,8 @@ CARD_KEYS = [
     "card-breakdown",
     "card-drawdown",
     "card-heatmap",
+    "card-accent-settings",
+    "card-appearance-settings",
 ]
 
 

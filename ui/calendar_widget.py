@@ -9,14 +9,18 @@ import streamlit as st
 from ui import theme
 from ui.dialogs import daily_entry_dialog
 
-WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+
+WEEK_TOTAL_COL = 6  # Saturday — Sun=0 .. Sat=6, repurposed as that week's P&L sum
 
 
 def render_month(weeks: list, account: dict | None, clickable: bool = True) -> None:
     """account is None for the All Accounts view — cells render read-only
     there, since a click can't be attributed to one specific account."""
     all_cells = [cell for week in weeks for cell in week]
-    st.markdown(theme.calendar_cell_css(all_cells), unsafe_allow_html=True)
+    week_total_keys = frozenset(week[WEEK_TOTAL_COL]["date"].isoformat() for week in weeks)
+    st.markdown(theme.calendar_cell_css(all_cells, week_total_keys), unsafe_allow_html=True)
 
     header_cols = st.columns(7)
     for col, label in zip(header_cols, WEEKDAY_LABELS):
@@ -24,11 +28,30 @@ def render_month(weeks: list, account: dict | None, clickable: bool = True) -> N
 
     interactive = clickable and account is not None
     for week in weeks:
+        week_pnls = [c["pnl"] for c in week if c["pnl"] is not None]
+        week_total = sum(week_pnls) if week_pnls else None
+
         cols = st.columns(7)
-        for col, cell in zip(cols, week):
+        for col_idx, (col, cell) in enumerate(zip(cols, week)):
             date_key = cell["date"].isoformat()
             with col:
                 with st.container(key=f"calday-{date_key}"):
+                    if col_idx == WEEK_TOTAL_COL:
+                        if week_total is not None:
+                            sign = "+" if week_total >= 0 else "-"
+                            amount = f"{sign}${abs(week_total):,.0f}"
+                            help_text = f"Week total: {sign}${abs(week_total):,.2f}"
+                        else:
+                            amount, help_text = "—", "No entries logged this week"
+                        st.button(
+                            f"Total  \n{amount}",
+                            key=f"calday-btn-{date_key}",
+                            help=help_text,
+                            disabled=True,
+                            width="stretch",
+                        )
+                        continue
+
                     # The day number and P&L amount are baked into ONE button
                     # label (markdown hard-break) rather than a button plus a
                     # separate markdown element below it — Streamlit sizes its

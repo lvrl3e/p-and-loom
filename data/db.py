@@ -34,9 +34,17 @@ ACCOUNT_COLUMNS = [
     "color",
     "profit_target",
     "max_drawdown_limit",
+    "drawdown_type",
     "daily_loss_limit",
     "status",
+    "login_account_number",
+    "login_password",
 ]
+
+# Added after the original accounts table shipped — new installs get them via
+# SCHEMA below, existing databases get them bolted on here since SQLite has
+# no "ADD COLUMN IF NOT EXISTS" (see _migrate_accounts_columns()).
+_ACCOUNT_MIGRATION_COLUMNS = ["login_account_number", "login_password", "drawdown_type"]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -49,8 +57,11 @@ CREATE TABLE IF NOT EXISTS accounts (
     color TEXT NOT NULL DEFAULT '#E85D9E',
     profit_target REAL,
     max_drawdown_limit REAL,
+    drawdown_type TEXT NOT NULL DEFAULT 'trailing',
     daily_loss_limit REAL,
     status TEXT NOT NULL DEFAULT 'Active',
+    login_account_number TEXT,
+    login_password TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -76,6 +87,11 @@ CREATE TABLE IF NOT EXISTS screenshots (
     daily_entry_id INTEGER NOT NULL REFERENCES daily_entries(id) ON DELETE CASCADE,
     file_path TEXT NOT NULL,
     uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
 );
 """
 
@@ -122,9 +138,17 @@ def get_connection():
         conn.close()
 
 
+def _migrate_accounts_columns(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
+    for column in _ACCOUNT_MIGRATION_COLUMNS:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE accounts ADD COLUMN {column} TEXT")
+
+
 def init_db():
     with get_connection() as conn:
         conn.executescript(SCHEMA)
+        _migrate_accounts_columns(conn)
 
 
 # ---------------------------------------------------------------- accounts
@@ -350,3 +374,28 @@ def get_all_screenshots(account_id: int | None = None) -> pd.DataFrame:
         df["entry_date"] = pd.to_datetime(df["entry_date"], errors="coerce")
         df["notes"] = df["notes"].where(df["notes"].notna(), None)
     return df
+
+
+# ------------------------------------------------------------------ settings
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+
+
+def delete_setting(key: str) -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM settings WHERE key = ?", (key,))

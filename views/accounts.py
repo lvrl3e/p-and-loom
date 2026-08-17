@@ -4,7 +4,7 @@ from data.db import init_db, get_all_accounts, get_daily_entries, coalesce
 from logic import analytics
 from ui import theme
 from ui.account_selector import set_selected_id
-from ui.dialogs import account_dialog
+from ui.dialogs import account_dialog, credentials_dialog
 from ui.format import fmt_currency_signed
 
 init_db()
@@ -43,13 +43,15 @@ for row_df in rows:
                 color = theme.pnl_color(stats["total_pnl"])
 
                 subtitle = coalesce(acct["firm"]) or coalesce(acct["account_type"]) or ""
+                has_credentials = bool(coalesce(acct.get("login_account_number")) or coalesce(acct.get("login_password")))
+                login_badge = '<span class="tj-badge tj-badge-neutral" style="margin-left:6px;">🔑 Saved</span>' if has_credentials else ""
                 card_html = (
                     '<div class="tj-acct-top">'
                     f'<div class="tj-acct-dot" style="background:{acct["color"]};"></div>'
                     f'<div><div class="tj-acct-name">{theme.esc(acct["name"])}</div>'
                     f'<div class="tj-acct-firm">{theme.esc(subtitle)}</div></div></div>'
                     f'<div class="tj-acct-balance">${stats["current_balance"]:,.2f}</div>'
-                    f'{theme.status_badge(acct["status"])}'
+                    f'{theme.status_badge(acct["status"])}{login_badge}'
                     '<div class="tj-acct-row"><div class="tj-acct-row-label">Account Size</div>'
                     f'<div class="tj-acct-row-value">${acct["account_size"]:,.0f}</div></div>'
                     '<div class="tj-acct-row"><div class="tj-acct-row-label">Total P&L</div>'
@@ -60,9 +62,14 @@ for row_df in rows:
                 st.markdown(card_html, unsafe_allow_html=True)
 
                 st.write("")
-                b1, b2 = st.columns(2)
-                if b1.button("Open Dashboard", key=f"open-{acct['id']}", type="secondary", width="stretch"):
+                b1, b2, b3 = st.columns([3, 2, 1])
+                if b1.button("Dashboard", key=f"open-{acct['id']}", type="secondary", width="stretch"):
                     set_selected_id(int(acct["id"]))
                     st.switch_page("views/overview.py")
                 if b2.button("Edit", key=f"edit-{acct['id']}", type="secondary", width="stretch"):
                     account_dialog(acct.to_dict())
+                if b3.button(
+                    "", icon=":material/key:", key=f"cred-{acct['id']}", type="secondary",
+                    width="stretch", help="Trading account credentials",
+                ):
+                    credentials_dialog(acct.to_dict())

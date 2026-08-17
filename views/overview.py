@@ -16,7 +16,8 @@ accounts_df = get_all_accounts()
 hour = dt.datetime.now().hour
 greeting = "Good morning" if hour < 12 else ("Good afternoon" if hour < 18 else "Good evening")
 st.markdown(
-    f'<div class="tj-page-header-title" style="font-size:1.6rem;">{greeting}, Trader 👋</div>'
+    f'<div class="tj-page-header-title" style="font-size:1.6rem; display:flex; align-items:center; gap:10px;">'
+    f'{greeting}, Trader <span style="color:{theme.ACCENT}; display:inline-flex;">{theme.icon_svg("heart", 22)}</span></div>'
     f'<div class="tj-page-header-sub" style="margin-bottom:1.25rem;">Here\'s your performance overview.</div>',
     unsafe_allow_html=True,
 )
@@ -99,7 +100,7 @@ with col_progress:
         if account is None:
             st.caption("Select a single account to see profit-target and drawdown progress.")
         else:
-            progress = analytics.prop_firm_progress(stats, account)
+            progress = analytics.prop_firm_progress(stats, account, equity)
             if progress["profit_target"]:
                 st.markdown(
                     f'<div class="tj-stat-sub" style="margin-bottom:6px;">Profit Target — '
@@ -113,9 +114,10 @@ with col_progress:
 
             st.write("")
             if progress["max_drawdown_limit"]:
+                dd_label = "Trailing" if progress["drawdown_type"] == "trailing" else "Static"
                 st.markdown(
-                    f'<div class="tj-stat-sub" style="margin-bottom:6px;">Drawdown — '
-                    f'${abs(stats["max_drawdown"]):,.0f} / ${progress["max_drawdown_limit"]:,.0f}</div>',
+                    f'<div class="tj-stat-sub" style="margin-bottom:6px;">Drawdown ({dd_label}) — '
+                    f'${progress["current_drawdown"]:,.0f} / ${progress["max_drawdown_limit"]:,.0f}</div>',
                     unsafe_allow_html=True,
                 )
                 st.markdown(theme.progress_bar(progress["drawdown_used_pct"], theme.BAD), unsafe_allow_html=True)
