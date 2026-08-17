@@ -6,7 +6,7 @@
 
 A modern **trading performance journal built for prop-firm and funded-account traders**. Track multiple trading accounts, log daily profit and loss, review performance through a calendar, and keep notes and screenshots for every trading day.
 
-![P&Loom Demo](p-and-loom-demo.gif.gif)
+![P&Loom Demo](dashboard.png)
 
 ## ✨ Features
 
