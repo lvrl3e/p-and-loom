@@ -260,7 +260,7 @@ streamlit run app.py
 On Windows, if `streamlit` isn't on your PATH or the activation script is blocked by execution policy, run it directly through the virtual environment instead:
 
 ```powershell
-.\.venv\Scripts\streamlit.exe run app.py --server.headless true
+.\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
 The application will open in your browser.
