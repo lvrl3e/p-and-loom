@@ -56,7 +56,7 @@ with st.container(key="stat-row"):
     cards = [
         theme.stat_card(
             "Current Balance", f"${stats['current_balance']:,.2f}", icon="wallet", accent=theme.ACCENT,
-            sub=f"Started at ${stats['starting_balance']:,.0f}",
+            sub=f"Started at ${stats['starting_balance']:,.2f}",
         ),
         theme.stat_card(
             "Total P&L", fmt_currency_signed(stats["total_pnl"]), icon="dollar",
@@ -105,11 +105,11 @@ with col_progress:
             if progress["profit_target"]:
                 st.markdown(
                     f'<div class="tj-stat-sub" style="margin-bottom:6px;">Profit Target — '
-                    f'${stats["total_pnl"]:,.0f} / ${progress["profit_target"]:,.0f}</div>',
+                    f'${stats["total_pnl"]:,.2f} / ${progress["profit_target"]:,.2f}</div>',
                     unsafe_allow_html=True,
                 )
                 st.markdown(theme.progress_bar(progress["target_progress_pct"], theme.GOOD), unsafe_allow_html=True)
-                st.caption(f"{progress['target_progress_pct']:.1f}% · ${progress['remaining_to_target']:,.0f} remaining")
+                st.caption(f"{progress['target_progress_pct']:.1f}% · \\${progress['remaining_to_target']:,.2f} remaining")
             else:
                 st.caption("No profit target set for this account.")
 
@@ -118,11 +118,11 @@ with col_progress:
                 dd_label = "Trailing" if progress["drawdown_type"] == "trailing" else "Static"
                 st.markdown(
                     f'<div class="tj-stat-sub" style="margin-bottom:6px;">Drawdown ({dd_label}) — '
-                    f'${progress["current_drawdown"]:,.0f} / ${progress["max_drawdown_limit"]:,.0f}</div>',
+                    f'${progress["current_drawdown"]:,.2f} / ${progress["max_drawdown_limit"]:,.2f}</div>',
                     unsafe_allow_html=True,
                 )
                 st.markdown(theme.progress_bar(progress["drawdown_used_pct"], theme.BAD), unsafe_allow_html=True)
-                st.caption(f"${progress['distance_to_drawdown']:,.0f} of room left")
+                st.caption(f"\\${progress['distance_to_drawdown']:,.2f} of room left")
             else:
                 st.caption("No drawdown limit set for this account.")
 
