@@ -5,6 +5,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from data.db import get_all_accounts, get_daily_entries
+from data.news import get_combined_calendar, get_saved_filter, save_filter, upcoming_events, IMPACT_LEVELS, SOURCES
 from logic import analytics
 from ui import charts, theme
 from ui.account_selector import render_selector, selected_account_and_entries, ALL_ACCOUNTS, get_selected_id
@@ -22,6 +23,50 @@ st.markdown(
     f'<div class="tj-page-header-sub" style="margin-bottom:1.25rem;">Here\'s your performance overview.</div>',
     unsafe_allow_html=True,
 )
+
+with st.container(key="card-news-widget"):
+    header_col, filter_col = st.columns([4, 1])
+    with header_col:
+        st.markdown(theme.card_header("Upcoming News", icon="calendar"), unsafe_allow_html=True)
+    with filter_col:
+        with st.popover("Filters", width="stretch"):
+            saved_sources = get_saved_filter("widget_sources", SOURCES)
+            widget_sources = st.multiselect("Source", SOURCES, default=saved_sources, key="news_widget_sources")
+            save_filter("widget_sources", widget_sources)
+
+            news_df_all = get_combined_calendar("this_week", sources=widget_sources)
+            all_currencies = sorted(news_df_all["country"].dropna().unique()) if not news_df_all.empty else []
+            saved_currencies = [c for c in get_saved_filter("widget_currencies", all_currencies) if c in all_currencies] or all_currencies
+            saved_impacts = get_saved_filter("widget_impacts", ["High", "Medium"])
+            widget_currencies = st.multiselect("Currency", all_currencies, default=saved_currencies, key="news_widget_currencies")
+            widget_impacts = st.multiselect("Impact", IMPACT_LEVELS, default=saved_impacts, key="news_widget_impacts")
+            save_filter("widget_currencies", widget_currencies)
+            save_filter("widget_impacts", widget_impacts)
+
+    next_events = upcoming_events(news_df_all, impacts=widget_impacts, currencies=widget_currencies, limit=5)
+    if next_events.empty:
+        next_week_df = get_combined_calendar("next_week", sources=widget_sources)
+        next_events = upcoming_events(next_week_df, impacts=widget_impacts, currencies=widget_currencies, limit=5)
+    if next_events.empty:
+        st.caption("No upcoming events match your filters.")
+    else:
+        rows_html = []
+        for _, ev in next_events.iterrows():
+            when = ev["date"].strftime("%a %I:%M %p").replace(" 0", " ")
+            rows_html.append(
+                '<div style="display:flex; align-items:center; gap:10px; padding:7px 0; '
+                f'border-top:1px solid {theme.BORDER};">'
+                f'<div style="width:80px; flex-shrink:0; font-size:0.76rem; color:{theme.TEXT_SECONDARY}; '
+                f'font-variant-numeric:tabular-nums;">{when}</div>'
+                f'<div style="width:40px; flex-shrink:0;"><span class="tj-tag">{theme.esc(ev["country"])}</span></div>'
+                f'<div style="width:66px; flex-shrink:0;">{theme.impact_badge(ev["impact"])}</div>'
+                f'<div style="flex:1; font-size:0.82rem; color:{theme.TEXT_PRIMARY};">{theme.esc(ev["title"])}</div>'
+                "</div>"
+            )
+        st.markdown("".join(rows_html), unsafe_allow_html=True)
+    st.caption("Full calendar under **Economic Calendar** in the sidebar.")
+
+st.write("")
 
 if accounts_df.empty:
     st.markdown(

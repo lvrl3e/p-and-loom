@@ -249,7 +249,10 @@ source .venv/bin/activate
 
 ```bash
 pip install -r requirements.txt
+playwright install chromium
 ```
+
+The second command downloads a headless Chromium browser (one-time, a few hundred MB) that the Economic Calendar page uses to fetch myfxbook's calendar — myfxbook blocks plain HTTP requests, so a real browser engine is needed to get past that. Skipping this step doesn't break the app; the Economic Calendar page just falls back to Forex Factory's calendar only.
 
 ### 4. Start the application
 

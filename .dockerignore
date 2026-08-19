@@ -1,0 +1,12 @@
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+.git/
+.streamlit/secrets.toml
+*.db
+*.sqlite
+*.sqlite3
+uploads/
+*.gif

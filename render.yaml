@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: p-and-loom
+    runtime: docker
+    plan: starter
+    disk:
+      name: p-and-loom-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: TRADING_JOURNAL_DB
+        value: /data/trading_journal.db
+      - key: TRADING_JOURNAL_UPLOADS
+        value: /data/uploads

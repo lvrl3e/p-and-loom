@@ -265,6 +265,7 @@ _ICON_PATHS = {
     "heart": '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>',
     "settings": '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>',
     "moon": '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>',
+    "check-circle": '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 17"></polyline>',
 }
 
 
@@ -494,9 +495,10 @@ def inject_css() -> None:
             border-radius: 10px;
         }}
 
-        /* Native widgets (segmented_control, tabs) bake Streamlit's config.toml
-           primaryColor into their selected-state styling at render time, so a
-           custom accent needs an explicit override here to actually reach them. */
+        /* Native widgets (segmented_control, tabs, multiselect tags) bake
+           Streamlit's config.toml primaryColor into their selected-state
+           styling at render time, so a custom accent needs an explicit
+           override here to actually reach them. */
         button[data-variant="segmented_control"][aria-checked="true"] {{
             color: {ACCENT} !important;
             background-color: {accent_rgba(0.1)} !important;
@@ -507,6 +509,10 @@ def inject_css() -> None:
         }}
         .stTabs [data-baseweb="tab-highlight"] {{
             background-color: {ACCENT} !important;
+        }}
+        [data-testid="stMultiSelectTagsContainer"] span[data-tag] {{
+            background-color: {ACCENT} !important;
+            color: {ON_ACCENT} !important;
         }}
 
         /* Text/number inputs, textareas, and selectboxes render with
@@ -597,6 +603,13 @@ def inject_css() -> None:
         }}
         [class*="st-key-shot-"]:hover {{
             border-color: {accent_rgba(0.35)};
+        }}
+        [class*="st-key-card-newsday-"] {{
+            background-color: {CARD_BG};
+            border: 1px solid {BORDER};
+            border-radius: 16px;
+            padding: 22px 24px;
+            margin-bottom: 4px;
         }}
         [class*="st-key-calday-"] {{
             border-radius: 10px;
@@ -1043,6 +1056,7 @@ CARD_KEYS = [
     "card-heatmap",
     "card-accent-settings",
     "card-appearance-settings",
+    "card-news-widget",
 ]
 
 
@@ -1140,6 +1154,17 @@ def streak_badge(count: int, streak_type: str | None) -> str:
         return '<span class="tj-badge tj-badge-neutral">No streak</span>'
     cls = "tj-badge-good" if streak_type == "Win" else "tj-badge-bad"
     return f'<span class="tj-badge {cls}">{count} {esc(streak_type)} streak</span>'
+
+
+def impact_badge(impact: str | None) -> str:
+    colors = {
+        "High": (BAD, BAD_BG),
+        "Medium": ("#EDA100", "rgba(237, 161, 0, 0.12)"),
+        "Low": (TEXT_SECONDARY, NEUTRAL_BG),
+        "Holiday": (ACCENT, accent_rgba(0.12)),
+    }
+    color, bg = colors.get(impact, (TEXT_SECONDARY, NEUTRAL_BG))
+    return f'<span class="tj-badge" style="color:{color}; background:{bg};">{esc(impact or "—")}</span>'
 
 
 def status_badge(status: str) -> str:

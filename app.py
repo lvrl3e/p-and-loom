@@ -29,9 +29,10 @@ journal = st.Page("views/journal.py", title="Daily Journal", icon=":material/rec
 calendar_page = st.Page("views/calendar.py", title="Calendar", icon=":material/calendar_month:")
 analytics_page = st.Page("views/analytics.py", title="Analytics", icon=":material/insights:")
 screenshots_page = st.Page("views/screenshots.py", title="Screenshots", icon=":material/image:")
+news_page = st.Page("views/news.py", title="Economic Calendar", icon=":material/newspaper:")
 settings_page = st.Page("views/settings.py", title="Settings", icon=":material/settings:")
 
-pg = st.navigation([overview, accounts_page, journal, calendar_page, analytics_page, screenshots_page, settings_page])
+pg = st.navigation([overview, accounts_page, journal, calendar_page, analytics_page, screenshots_page, news_page, settings_page])
 
 accounts_df = get_all_accounts()
 ensure_selection(accounts_df)
